@@ -475,7 +475,8 @@ private final class MouselessApplicationController: NSObject {
   }
 
   @objc private func frame(_ link: CADisplayLink) {
-    let delta = min(max(link.timestamp - (lastFrameTime ?? link.timestamp), 0), 0.25)
+    let elapsed = link.timestamp - (lastFrameTime ?? link.timestamp)
+    let delta = elapsed.isFinite ? max(elapsed, 0) : 0
     lastFrameTime = link.timestamp
     apply(runtimeResponse(for: .frame(deltaTime: delta)))
     permissionCheckTime += delta

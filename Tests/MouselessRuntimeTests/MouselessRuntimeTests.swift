@@ -108,6 +108,109 @@ final class MouselessRuntimeTests: XCTestCase {
     XCTAssertEqual(point.y - 100, 39.3, accuracy: 0.4)
   }
 
+  func testMovementUsesTheEntireLongFrameInterval() {
+    let runtime = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 0, y: 0))
+    enterFreeMode(runtime)
+    _ = runtime.handle(.keyDown(.l, at: 1))
+
+    let response = runtime.handle(.frame(deltaTime: 1))
+
+    guard let point = pointer(from: response) else {
+      return XCTFail("expected movement during a long frame")
+    }
+    XCTAssertEqual(point.x, 300, accuracy: 0.5)
+  }
+
+  func testMovementSpeedSupportsPrecisionAndThreeStackingFastKeys() {
+    let fastKeySets: [[Key]] = [
+      [], [.s], [.d], [.f], [.s, .d], [.s, .f], [.d, .f], [.s, .d, .f],
+    ]
+    for precision in [false, true] {
+      for fastKeys in fastKeySets {
+        let runtime = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 0, y: 0))
+        enterFreeMode(runtime)
+        _ = runtime.handle(.keyDown(.l, at: 1))
+        if precision { _ = runtime.handle(.keyDown(.a, at: 1.1)) }
+        for key in fastKeys {
+          _ = runtime.handle(.keyDown(key, at: 1.2))
+        }
+
+        guard let point = pointer(from: runtime.handle(.frame(deltaTime: 1))) else {
+          return XCTFail("expected movement for multiplier combination")
+        }
+        let expected = 300.0 * (precision ? 1.0 / 3.0 : 1) * pow(3, Double(fastKeys.count))
+        XCTAssertEqual(point.x, expected, accuracy: 0.5)
+      }
+    }
+  }
+
+  func testOpposingDirectionsCancelWithoutAffectingTheOtherAxis() {
+    let runtime = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 10, y: 20))
+    enterFreeMode(runtime)
+    _ = runtime.handle(.keyDown(.i, at: 1))
+    _ = runtime.handle(.keyDown(.k, at: 1.1))
+    _ = runtime.handle(.keyDown(.l, at: 1.2))
+
+    guard let point = pointer(from: runtime.handle(.frame(deltaTime: 1))) else {
+      return XCTFail("expected movement on the non-conflicting axis")
+    }
+    XCTAssertEqual(point.x, 310, accuracy: 0.5)
+    XCTAssertEqual(point.y, 20, accuracy: 0.001)
+  }
+
+  func testAutoRepeatDoesNotCreateMotionEdgesOrChangeSpeedState() {
+    let repeated = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 0, y: 0))
+    enterFreeMode(repeated)
+    _ = repeated.handle(.keyDown(.l, at: 1))
+    _ = repeated.handle(.keyDown(.s, at: 1))
+    for _ in 0..<4 {
+      _ = repeated.handle(.keyDown(.l, at: 1.1, isAutoRepeat: true))
+      _ = repeated.handle(.keyDown(.s, at: 1.1, isAutoRepeat: true))
+    }
+
+    let ordinary = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 0, y: 0))
+    enterFreeMode(ordinary)
+    _ = ordinary.handle(.keyDown(.l, at: 1))
+    _ = ordinary.handle(.keyDown(.s, at: 1))
+
+    XCTAssertEqual(
+      pointer(from: repeated.handle(.frame(deltaTime: 1))),
+      pointer(from: ordinary.handle(.frame(deltaTime: 1))))
+  }
+
+  func testMovementSmoothingUsesTheConfiguredTimeConstantWhenStartingChangingAndStopping() throws {
+    let runtime = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 0, y: 0))
+    enterFreeMode(runtime)
+    _ = runtime.handle(.keyDown(.l, at: 1))
+
+    let first = runtime.handle(.frame(deltaTime: 0.075))
+    let firstPoint = try XCTUnwrap(pointer(from: first))
+    let alpha = 1 - exp(-1.0)
+    XCTAssertEqual(firstPoint.x, 300 * alpha * 0.075, accuracy: 0.001)
+
+    _ = runtime.handle(.keyDown(.s, at: 1.075))
+    let changed = runtime.handle(.frame(deltaTime: 0.075))
+    let changedPoint = try XCTUnwrap(pointer(from: changed))
+    let firstVelocity = 300 * alpha
+    let changedVelocity = firstVelocity + (900 - firstVelocity) * alpha
+    XCTAssertEqual(changedPoint.x - firstPoint.x, changedVelocity * 0.075, accuracy: 0.001)
+    XCTAssertLessThan(changedPoint.x - firstPoint.x, 900 * 0.075)
+
+    _ = runtime.handle(.keyUp(.s, at: 1.15))
+    _ = runtime.handle(.keyUp(.l, at: 1.15))
+    let stopped = runtime.handle(.frame(deltaTime: 0.075))
+    let stoppedPoint = try XCTUnwrap(pointer(from: stopped))
+    let stoppedVelocity = changedVelocity * (1 - alpha)
+    XCTAssertEqual(stoppedPoint.x - changedPoint.x, stoppedVelocity * 0.075, accuracy: 0.001)
+  }
+
+  func testSixtyAndOneTwentyHertzProduceNearlyTheSameHeldMovement() {
+    let sixtyHertz = heldMovement(frameDelta: 1.0 / 60.0, frameCount: 60)
+    let oneTwentyHertz = heldMovement(frameDelta: 1.0 / 120.0, frameCount: 120)
+
+    XCTAssertEqual(sixtyHertz, oneTwentyHertz, accuracy: 2)
+  }
+
   func testMouseButtonsPairEdgesIgnoreAutoRepeatAndReleaseOnExit() {
     let runtime = MouselessRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
@@ -155,7 +258,7 @@ final class MouselessRuntimeTests: XCTestCase {
       permissions: .allGranted, topology: topology, pointer: Point(x: 50, y: 50))
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.l, at: 1))
-    let response = runtime.handle(.frame(deltaTime: 1))
+    let response = runtime.handle(.frame(deltaTime: 0.2))
 
     guard
       case .pointerMoved(to: let point, buttons: _) = response.effects.first(where: {
@@ -219,5 +322,25 @@ final class MouselessRuntimeTests: XCTestCase {
   private func enterFreeMode(_ runtime: MouselessRuntime) {
     _ = runtime.handle(.keyDown(.leftOption, at: 0))
     _ = runtime.handle(.keyUp(.leftOption, at: 0.1))
+  }
+
+  private func pointer(from response: RuntimeResponse) -> Point? {
+    response.effects.compactMap { effect in
+      guard case .pointerMoved(to: let point, buttons: _) = effect else { return nil }
+      return point
+    }.last
+  }
+
+  private func heldMovement(frameDelta: TimeInterval, frameCount: Int) -> Double {
+    let runtime = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 0, y: 0))
+    enterFreeMode(runtime)
+    _ = runtime.handle(.keyDown(.l, at: 1))
+    var lastPoint = 0.0
+    for _ in 0..<frameCount {
+      if let point = pointer(from: runtime.handle(.frame(deltaTime: frameDelta))) {
+        lastPoint = point.x
+      }
+    }
+    return lastPoint
   }
 }

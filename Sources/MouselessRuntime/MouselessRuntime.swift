@@ -634,7 +634,7 @@ public final class MouselessRuntime {
     guard modeEnabled, permissions.isReady else {
       return RuntimeResponse(disposition: .passThrough)
     }
-    let dt = min(max(deltaTime, 0), 0.25)
+    let dt = deltaTime.isFinite ? max(deltaTime, 0) : 0
     let movementTarget =
       movementVector() * (configuration.movement.baseSpeed * movementMultiplier())
     movementVelocity = smoothed(
