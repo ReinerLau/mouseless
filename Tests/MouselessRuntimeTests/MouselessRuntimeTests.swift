@@ -25,6 +25,17 @@ final class MouselessRuntimeTests: XCTestCase {
     XCTAssertTrue(response.effects.contains(.indicator(isVisible: true)))
   }
 
+  func testModifierChangedLeftOptionTapEntersFreeModeWhenCapabilitiesAreReady() {
+    let runtime = MouselessRuntime(permissions: .allGranted)
+
+    _ = runtime.handle(.modifierChanged(.leftOption, isPressed: true, at: 0))
+    let response = runtime.handle(.modifierChanged(.leftOption, isPressed: false, at: 0.1))
+
+    XCTAssertEqual(response.disposition, .passThrough)
+    XCTAssertTrue(response.effects.contains(.modeChanged(isEnabled: true)))
+    XCTAssertTrue(response.effects.contains(.indicator(isVisible: true)))
+  }
+
   func testLeftOptionTimeoutAndCombinationDoNotToggle() {
     let runtime = MouselessRuntime(permissions: .allGranted)
 

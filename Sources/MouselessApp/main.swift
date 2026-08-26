@@ -134,6 +134,7 @@ private final class EventTapHost {
       let mask =
         (CGEventMask(1) << CGEventType.keyDown.rawValue)
         | (CGEventMask(1) << CGEventType.keyUp.rawValue)
+        | (CGEventMask(1) << CGEventType.flagsChanged.rawValue)
         | (CGEventMask(1) << CGEventType.mouseMoved.rawValue)
         | (CGEventMask(1) << CGEventType.leftMouseDragged.rawValue)
         | (CGEventMask(1) << CGEventType.rightMouseDragged.rawValue)
@@ -349,6 +350,12 @@ private final class MouselessApplicationController: NSObject {
             key, at: timestamp,
             isAutoRepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0)
           : .keyUp(key, at: timestamp))
+    case .flagsChanged:
+      let key = key(for: CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode)))
+      let timestamp = Double(event.timestamp) / 1_000_000_000
+      response = runtimeResponse(
+        for: .modifierChanged(
+          key, isPressed: event.flags.contains(.maskAlternate), at: timestamp))
     case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
       response = runtimeResponse(
         for: .pointerMoved(to: Point(x: event.location.x, y: event.location.y)))

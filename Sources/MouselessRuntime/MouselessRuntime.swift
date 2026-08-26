@@ -175,6 +175,7 @@ public struct RuntimeEvent {
   fileprivate enum Kind {
     case keyDown(Key, timestamp: TimeInterval, isAutoRepeat: Bool)
     case keyUp(Key, timestamp: TimeInterval)
+    case modifierChanged(Key, isPressed: Bool, timestamp: TimeInterval)
     case frame(deltaTime: TimeInterval)
     case pointerMoved(Point, source: PointerSource)
     case topologyChanged(DisplayTopology)
@@ -196,6 +197,12 @@ public struct RuntimeEvent {
 
   public static func keyUp(_ key: Key, at timestamp: TimeInterval) -> RuntimeEvent {
     RuntimeEvent(kind: .keyUp(key, timestamp: timestamp))
+  }
+
+  public static func modifierChanged(_ key: Key, isPressed: Bool, at timestamp: TimeInterval)
+    -> RuntimeEvent
+  {
+    RuntimeEvent(kind: .modifierChanged(key, isPressed: isPressed, timestamp: timestamp))
   }
 
   public static func frame(deltaTime: TimeInterval) -> RuntimeEvent {
@@ -522,6 +529,10 @@ public final class MouselessRuntime {
     case .keyDown(let key, let timestamp, let isAutoRepeat):
       return keyDown(key, timestamp: timestamp, isAutoRepeat: isAutoRepeat)
     case .keyUp(let key, let timestamp): return keyUp(key, timestamp: timestamp)
+    case .modifierChanged(let key, let isPressed, let timestamp):
+      return isPressed
+        ? keyDown(key, timestamp: timestamp, isAutoRepeat: false)
+        : keyUp(key, timestamp: timestamp)
     case .frame(let deltaTime): return frame(deltaTime: deltaTime)
     case .pointerMoved(let point, let source):
       if source == .physical { pointer = topology.projected(point) }
