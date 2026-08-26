@@ -9,6 +9,18 @@ import QuartzCore
 private let synthesizedEventMarker: Int64 = 0x4D4F_5553_4C45_5353
 private let logger = Logger(subsystem: "com.reinerlau.mouseless", category: "runtime")
 
+private func primaryScreenTop() -> CGFloat {
+  NSScreen.screens.first?.frame.maxY ?? 0
+}
+
+private func cocoaPoint(fromQuartz point: CGPoint) -> Point {
+  Point(x: point.x, y: primaryScreenTop() - point.y)
+}
+
+private func quartzPoint(fromCocoa point: Point) -> CGPoint {
+  CGPoint(x: point.x, y: primaryScreenTop() - point.y)
+}
+
 private final class SystemPermissionProvider {
   func current(prompt: Bool) -> PermissionState {
     let options =
@@ -58,12 +70,13 @@ private final class CoreGraphicsEffectExecutor {
   private func execute(_ effect: RuntimeEffect) {
     switch effect {
     case .pointerMoved(to: let point, let buttons):
-      let cgPoint = CGPoint(x: point.x, y: point.y)
       if buttons.isEmpty {
-        postMouse(type: .mouseMoved, point: cgPoint, button: .left)
+        postMouse(type: .mouseMoved, point: quartzPoint(fromCocoa: point), button: .left)
       } else {
         for button in buttons.sorted(by: { $0.rawValue < $1.rawValue }) {
-          postMouse(type: draggedType(for: button), point: cgPoint, button: cgButton(for: button))
+          postMouse(
+            type: draggedType(for: button), point: quartzPoint(fromCocoa: point),
+            button: cgButton(for: button))
         }
       }
     case .mouseButton(let button, let phase):
@@ -141,7 +154,7 @@ private final class EventTapHost {
         | (CGEventMask(1) << CGEventType.otherMouseDragged.rawValue)
       guard
         let tap = CGEvent.tapCreate(
-          tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
+          tap: .cghidEventTap, place: .headInsertEventTap, options: .defaultTap,
           eventsOfInterest: mask, callback: eventTapCallback,
           userInfo: Unmanaged.passUnretained(self).toOpaque()),
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
@@ -253,6 +266,9 @@ private final class MouselessApplicationController: NSObject {
     configureMenu()
     reloadConfiguration(createIfMissing: true)
     apply(runtimeResponse(for: .topologyChanged(currentTopology())))
+    apply(
+      runtimeResponse(
+        for: .pointerMoved(to: cocoaPoint(fromQuartz: CGEvent(source: nil)?.location ?? .zero))))
     registerLifecycleObservers()
     checkPermissions(prompt: true)
     displayLink = NSScreen.main?.displayLink(target: self, selector: #selector(frame(_:)))
@@ -358,7 +374,7 @@ private final class MouselessApplicationController: NSObject {
           key, isPressed: event.flags.contains(.maskAlternate), at: timestamp))
     case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
       response = runtimeResponse(
-        for: .pointerMoved(to: Point(x: event.location.x, y: event.location.y)))
+        for: .pointerMoved(to: cocoaPoint(fromQuartz: event.location)))
     default: response = RuntimeResponse(disposition: .passThrough)
     }
     apply(response)
