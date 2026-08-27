@@ -717,7 +717,174 @@ final class MouselessRuntimeTests: XCTestCase {
     validObject["unexpected"] = true
     let invalid = try JSONSerialization.data(withJSONObject: validObject)
     let rejected = runtime.handle(.configuration(invalid))
-    XCTAssertTrue(rejected.effects.contains(.configurationRejected))
+    XCTAssertTrue(rejected.effects.contains(where: { effect in
+      if case .configurationRejected = effect { return true }
+      return false
+    }))
+  }
+
+  func testAcceptedConfigurationReleasesButtonsBeforeReplacingBindings() throws {
+    let runtime = MouselessRuntime(permissions: .allGranted)
+    enterFreeMode(runtime)
+    _ = runtime.handle(.keyDown(.space, at: 1))
+
+    var object = try configurationObject()
+    var bindings = try XCTUnwrap(object["bindings"] as? [String: Any])
+    bindings["leftClick"] = "r"
+    bindings["rightClick"] = "space"
+    object["bindings"] = bindings
+
+    let response = runtime.handle(
+      .configuration(try JSONSerialization.data(withJSONObject: object)))
+    XCTAssertEqual(response.effects.first, .mouseButton(.left, .up))
+    XCTAssertTrue(response.effects.contains(.configurationAccepted))
+  }
+
+  func testDefaultConfigurationJSONContainsTheConfirmedDefaultsAndSchemaVersion() throws {
+    let accepted = MouselessRuntime(permissions: .allGranted).handle(
+      .configuration(RuntimeConfiguration.defaultJSON))
+
+    XCTAssertTrue(accepted.effects.contains(.configurationAccepted))
+  }
+
+  func testValidConfigurationChangesBindingsThresholdScrollAndIndicator() throws {
+    let runtime = MouselessRuntime(permissions: .allGranted)
+    var object = try configurationObject()
+    var bindings = try XCTUnwrap(object["bindings"] as? [String: Any])
+    bindings["moveUp"] = "l"
+    bindings["moveRight"] = "i"
+    object["bindings"] = bindings
+    object["optionTapMilliseconds"] = 100.0
+    var scrolling = try XCTUnwrap(object["scrolling"] as? [String: Any])
+    scrolling["baseSpeed"] = 100.0
+    scrolling["precisionMultiplier"] = 0.5
+    scrolling["fastMultiplier"] = 2.0
+    scrolling["smoothingMilliseconds"] = 1.0
+    object["scrolling"] = scrolling
+    var indicator = try XCTUnwrap(object["indicator"] as? [String: Any])
+    indicator["enabled"] = false
+    object["indicator"] = indicator
+
+    let accepted = runtime.handle(
+      .configuration(try JSONSerialization.data(withJSONObject: object)))
+    XCTAssertTrue(accepted.effects.contains(.configurationAccepted))
+
+    _ = runtime.handle(.keyDown(.leftOption, at: 0))
+    let timedOut = runtime.handle(.keyUp(.leftOption, at: 0.101))
+    XCTAssertFalse(timedOut.effects.contains(.modeChanged(isEnabled: true)))
+    _ = runtime.handle(.keyDown(.leftOption, at: 1))
+    let entered = runtime.handle(.keyUp(.leftOption, at: 1.05))
+    XCTAssertTrue(entered.effects.contains(.indicator(isVisible: false)))
+
+    _ = runtime.handle(.keyDown(.i, at: 2))
+    let right = try XCTUnwrap(pointer(from: runtime.handle(.frame(deltaTime: 1))))
+    XCTAssertEqual(right.x, 300, accuracy: 0.5)
+    XCTAssertEqual(right.y, 0, accuracy: 0.5)
+
+    _ = runtime.handle(.keyUp(.i, at: 3))
+    _ = runtime.handle(.keyDown(.m, at: 3.1))
+    _ = runtime.handle(.keyDown(.a, at: 3.2))
+    _ = runtime.handle(.keyDown(.s, at: 3.3))
+    let scroll = try XCTUnwrap(scroll(from: runtime.handle(.frame(deltaTime: 1))))
+    XCTAssertEqual(scroll.y, 100, accuracy: 1)
+  }
+
+  func testValidConfigurationChangesRuntimeBehaviorAndIndicatorSize() throws {
+    let runtime = MouselessRuntime(permissions: .allGranted)
+    var object = try configurationObject()
+    var movement = try XCTUnwrap(object["movement"] as? [String: Any])
+    movement["baseSpeed"] = 600.0
+    object["movement"] = movement
+    var indicator = try XCTUnwrap(object["indicator"] as? [String: Any])
+    indicator["size"] = 12.0
+    object["indicator"] = indicator
+
+    let accepted = runtime.handle(.configuration(try JSONSerialization.data(withJSONObject: object)))
+    XCTAssertTrue(accepted.effects.contains(.configurationAccepted))
+
+    _ = runtime.handle(.keyDown(.leftOption, at: 0))
+    let entered = runtime.handle(.keyUp(.leftOption, at: 0.1))
+    XCTAssertTrue(containsIndicatorSize(12, in: entered))
+    _ = runtime.handle(.keyDown(.l, at: 1))
+    XCTAssertEqual(try XCTUnwrap(pointer(from: runtime.handle(.frame(deltaTime: 1)))).x, 600, accuracy: 0.5)
+  }
+
+  func testRejectedConfigurationPreservesThePreviousValidBehavior() throws {
+    let runtime = MouselessRuntime(permissions: .allGranted)
+    var validObject = try configurationObject()
+    var movement = try XCTUnwrap(validObject["movement"] as? [String: Any])
+    movement["baseSpeed"] = 600.0
+    validObject["movement"] = movement
+    _ = runtime.handle(.configuration(try JSONSerialization.data(withJSONObject: validObject)))
+
+    var invalidObject = validObject
+    invalidObject["unexpected"] = true
+    let rejected = runtime.handle(.configuration(try JSONSerialization.data(withJSONObject: invalidObject)))
+    XCTAssertTrue(rejected.effects.contains(where: { effect in
+      if case .configurationRejected(let reason) = effect { return reason.contains("unknown field") }
+      return false
+    }))
+
+    enterFreeMode(runtime)
+    _ = runtime.handle(.keyDown(.l, at: 1))
+    XCTAssertEqual(try XCTUnwrap(pointer(from: runtime.handle(.frame(deltaTime: 1)))).x, 600, accuracy: 0.5)
+  }
+
+  func testConfigurationRejectsMalformedJSONWithAReadableReason() {
+    let response = MouselessRuntime(permissions: .allGranted).handle(
+      .configuration(Data("{not json".utf8)))
+
+    XCTAssertTrue(response.effects.contains(where: { effect in
+      if case .configurationRejected(let reason) = effect { return reason.contains("invalid JSON") }
+      return false
+    }))
+  }
+
+  func testConfigurationRejectsUnsupportedSchemaVersion() throws {
+    var object = try configurationObject()
+    object["schemaVersion"] = 2
+
+    let response = MouselessRuntime(permissions: .allGranted).handle(
+      .configuration(try JSONSerialization.data(withJSONObject: object)))
+
+    XCTAssertTrue(response.effects.contains(where: { effect in
+      if case .configurationRejected(let reason) = effect {
+        return reason.contains("schema version") && reason.contains("2")
+      }
+      return false
+    }))
+  }
+
+  func testConfigurationRejectsDuplicateBindings() throws {
+    var object = try configurationObject()
+    var bindings = try XCTUnwrap(object["bindings"] as? [String: Any])
+    bindings["moveDown"] = bindings["moveUp"]
+    object["bindings"] = bindings
+
+    let response = MouselessRuntime(permissions: .allGranted).handle(
+      .configuration(try JSONSerialization.data(withJSONObject: object)))
+
+    XCTAssertTrue(response.effects.contains(where: { effect in
+      if case .configurationRejected(let reason) = effect { return reason.contains("duplicate binding") }
+      return false
+    }))
+  }
+
+  func testConfigurationRejectsOutOfRangeParameters() throws {
+    var object = try configurationObject()
+    var scrolling = try XCTUnwrap(object["scrolling"] as? [String: Any])
+    scrolling["smoothingMilliseconds"] = 0.0
+    object["scrolling"] = scrolling
+
+    let response = MouselessRuntime(permissions: .allGranted).handle(
+      .configuration(try JSONSerialization.data(withJSONObject: object)))
+
+    XCTAssertTrue(response.effects.contains(where: { effect in
+      if case .configurationRejected(let reason) = effect {
+        return reason.contains("scrolling.smoothingMilliseconds")
+      }
+      return false
+    }))
   }
 
   func testEventTapFailureRequestsRecoveryWithoutChangingMode() {
@@ -773,5 +940,19 @@ final class MouselessRuntimeTests: XCTestCase {
     var total = 0
     for _ in 0..<frameCount { total += scroll(from: runtime.handle(.frame(deltaTime: frameDelta)))?.y ?? 0 }
     return total
+  }
+
+  private func configurationObject() throws -> [String: Any] {
+    try XCTUnwrap(
+      JSONSerialization.jsonObject(with: RuntimeConfiguration.defaultJSON) as? [String: Any])
+  }
+
+  private func containsIndicatorSize(_ size: Double, in response: RuntimeResponse) -> Bool {
+    response.effects.contains(where: { effect in
+      if case .indicatorSizeChanged(let actualSize) = effect {
+        return actualSize == size
+      }
+      return false
+    })
   }
 }

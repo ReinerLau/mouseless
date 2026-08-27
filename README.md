@@ -19,3 +19,8 @@ swift test
 ```
 
 On first launch, use Request Permissions and grant Accessibility, Input Monitoring (Listen Event), and Post Event access. The menu offers Recheck Permissions, Open System Settings, Reload Configuration, diagnostics, and Quit.
+
+The first launch creates `~/Library/Application Support/Mouseless/config.json`. Edit only the
+documented JSON fields, then choose Reload Configuration from the menu. Invalid files are rejected
+without replacing the last valid runtime configuration. The interactive real-app check is
+`./Scripts/configuration-smoke-test.sh`.

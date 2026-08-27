@@ -184,12 +184,13 @@ public enum RuntimeEffect: Equatable, Sendable {
   case capabilitiesChanged(PermissionState)
   case modeChanged(isEnabled: Bool)
   case indicator(isVisible: Bool)
+  case indicatorSizeChanged(size: Double)
   case pointerPositionChanged(to: Point)
   case pointerMoved(to: Point, buttons: Set<MouseButton>)
   case mouseButton(MouseButton, ButtonPhase)
   case scroll(pixelX: Int, pixelY: Int)
   case configurationAccepted
-  case configurationRejected
+  case configurationRejected(reason: String)
   case eventTapShouldBeReenabled
   case diagnostic(Diagnostic)
 }
@@ -483,25 +484,49 @@ public struct RuntimeConfiguration: Codable, Equatable, Sendable {
   }
 
   public func validated() throws -> RuntimeConfiguration {
-    guard schemaVersion == 1, optionTapMilliseconds > 0, optionTapMilliseconds <= 1_000,
-      movement.baseSpeed > 0, movement.precisionMultiplier > 0, movement.fastMultiplier >= 1,
-      movement.smoothingMilliseconds > 0,
-      scrolling.baseSpeed > 0, scrolling.precisionMultiplier > 0, scrolling.fastMultiplier >= 1,
-      scrolling.smoothingMilliseconds > 0,
-      indicator.size > 0, indicator.size <= 100
-    else { throw ConfigurationError.invalidValue }
+    guard schemaVersion == 1 else {
+      throw ConfigurationError.unsupportedSchemaVersion(schemaVersion)
+    }
+    try validate(
+      optionTapMilliseconds, named: "optionTapMilliseconds", range: 0.001...1_000)
+    try validate(movement.baseSpeed, named: "movement.baseSpeed", range: 1...10_000)
+    try validate(
+      movement.precisionMultiplier, named: "movement.precisionMultiplier", range: 0.001...1)
+    try validate(movement.fastMultiplier, named: "movement.fastMultiplier", range: 1...10)
+    try validate(
+      movement.smoothingMilliseconds, named: "movement.smoothingMilliseconds", range: 1...1_000)
+    try validate(scrolling.baseSpeed, named: "scrolling.baseSpeed", range: 1...50_000)
+    try validate(
+      scrolling.precisionMultiplier, named: "scrolling.precisionMultiplier", range: 0.001...1)
+    try validate(scrolling.fastMultiplier, named: "scrolling.fastMultiplier", range: 1...10)
+    try validate(
+      scrolling.smoothingMilliseconds, named: "scrolling.smoothingMilliseconds", range: 1...1_000)
+    try validate(indicator.size, named: "indicator.size", range: 0.5...100)
 
-    let names = [
-      bindings.toggle, bindings.escape, bindings.moveUp, bindings.moveDown, bindings.moveLeft,
-      bindings.moveRight,
-      bindings.leftClick, bindings.rightClick, bindings.middleClick, bindings.backClick,
-      bindings.forwardClick,
-      bindings.scrollUp, bindings.scrollDown, bindings.scrollLeft, bindings.scrollRight,
-      bindings.precision,
-      bindings.speedOne, bindings.speedTwo, bindings.speedThree,
+    let namedBindings = [
+      ("toggle", bindings.toggle), ("escape", bindings.escape), ("moveUp", bindings.moveUp),
+      ("moveDown", bindings.moveDown), ("moveLeft", bindings.moveLeft),
+      ("moveRight", bindings.moveRight), ("leftClick", bindings.leftClick),
+      ("rightClick", bindings.rightClick), ("middleClick", bindings.middleClick),
+      ("backClick", bindings.backClick), ("forwardClick", bindings.forwardClick),
+      ("scrollUp", bindings.scrollUp), ("scrollDown", bindings.scrollDown),
+      ("scrollLeft", bindings.scrollLeft), ("scrollRight", bindings.scrollRight),
+      ("precision", bindings.precision), ("speedOne", bindings.speedOne),
+      ("speedTwo", bindings.speedTwo), ("speedThree", bindings.speedThree),
     ]
-    guard names.allSatisfy({ Key(configurationName: $0).isValidConfigurationKey }) else {
-      throw ConfigurationError.invalidKey
+    if let invalid = namedBindings.first(where: { !Key(configurationName: $0.1).isValidConfigurationKey }) {
+      throw ConfigurationError.invalidKey(name: invalid.0, value: invalid.1)
+    }
+    var bindingNamesByValue: [String: [String]] = [:]
+    for (name, value) in namedBindings {
+      bindingNamesByValue[value, default: []].append(name)
+    }
+    let duplicates = bindingNamesByValue
+      .filter { $0.value.count > 1 }
+      .flatMap { $0.value }
+      .sorted()
+    if !duplicates.isEmpty {
+      throw ConfigurationError.duplicateBindings(duplicates)
     }
     return self
   }
@@ -513,9 +538,30 @@ public struct RuntimeConfiguration: Codable, Equatable, Sendable {
   }
 }
 
-public enum ConfigurationError: Error, Equatable, Sendable {
-  case invalidValue
-  case invalidKey
+public enum ConfigurationError: Error, Equatable, Sendable, LocalizedError {
+  case invalidJSON
+  case unknownFields([String])
+  case unsupportedSchemaVersion(Int)
+  case duplicateBindings([String])
+  case invalidValue(name: String, description: String)
+  case invalidKey(name: String, value: String)
+
+  public var errorDescription: String? {
+    switch self {
+    case .invalidJSON:
+      return "invalid JSON configuration"
+    case .unknownFields(let fields):
+      return "unknown field(s) in configuration: " + fields.sorted().joined(separator: ", ")
+    case .unsupportedSchemaVersion(let version):
+      return "unsupported configuration schema version: " + String(version)
+    case .duplicateBindings(let bindings):
+      return "duplicate binding key(s): " + bindings.sorted().joined(separator: ", ")
+    case .invalidValue(let name, let description):
+      return "invalid configuration value for " + name + ": " + description
+    case .invalidKey(let name, let value):
+      return "unsupported key for " + name + ": " + value
+    }
+  }
 }
 
 private struct AnyCodingKey: CodingKey {
@@ -534,8 +580,39 @@ private struct AnyCodingKey: CodingKey {
 
 private func rejectUnknownKeys(_ decoder: Decoder, allowed: [String]) throws {
   let container = try decoder.container(keyedBy: AnyCodingKey.self)
-  if container.allKeys.map(\.stringValue).contains(where: { !allowed.contains($0) }) {
-    throw ConfigurationError.invalidValue
+  let unknown = container.allKeys.map(\.stringValue).filter { !allowed.contains($0) }.sorted()
+  if !unknown.isEmpty {
+    throw ConfigurationError.unknownFields(unknown)
+  }
+}
+
+private func validate(_ value: Double, named name: String, range: ClosedRange<Double>) throws {
+  guard value.isFinite, range.contains(value) else {
+    throw ConfigurationError.invalidValue(
+      name: name,
+      description: "must be between \(range.lowerBound) and \(range.upperBound)")
+  }
+}
+
+private func decodingErrorDescription(_ error: Error) -> String {
+  let path: ([any CodingKey]) -> String = { codingPath in
+    codingPath.map(\.stringValue).joined(separator: ".")
+  }
+  switch error {
+  case DecodingError.keyNotFound(let key, let context):
+    let prefix = path(context.codingPath)
+    return "invalid JSON configuration: missing field " + (prefix.isEmpty ? key.stringValue : prefix + "." + key.stringValue)
+  case DecodingError.typeMismatch(_, let context):
+    let location = path(context.codingPath)
+    return "invalid JSON configuration: invalid value type at " + (location.isEmpty ? "root" : location)
+  case DecodingError.valueNotFound(_, let context):
+    let location = path(context.codingPath)
+    return "invalid JSON configuration: missing value at " + (location.isEmpty ? "root" : location)
+  case DecodingError.dataCorrupted(let context):
+    let location = path(context.codingPath)
+    return "invalid JSON configuration: " + (location.isEmpty ? context.debugDescription : location + ": " + context.debugDescription)
+  default:
+    return "invalid JSON configuration"
   }
 }
 
@@ -611,14 +688,41 @@ public final class MouselessRuntime {
     case .configuration(let data):
       do {
         let decoded = try JSONDecoder().decode(RuntimeConfiguration.self, from: data).validated()
+        let releasedButtons = heldButtons.sorted { $0.rawValue < $1.rawValue }.map {
+          RuntimeEffect.mouseButton($0, .up)
+        }
         configuration = decoded
+        heldButtons.removeAll()
+        pressedKeys.removeAll()
+        optionDownAt = nil
+        optionHadCombination = false
+        movementVelocity = Point(x: 0, y: 0)
+        scrollVelocity = Point(x: 0, y: 0)
+        scrollRemainder = Point(x: 0, y: 0)
+        var effects = releasedButtons
+        effects.append(.configurationAccepted)
+        effects.append(.diagnostic(.configurationAccepted))
+        if modeEnabled {
+          effects.append(.indicatorSizeChanged(size: decoded.indicator.size))
+          effects.append(.indicator(isVisible: decoded.indicator.enabled))
+        }
         return RuntimeResponse(
           disposition: .passThrough,
-          effects: [.configurationAccepted, .diagnostic(.configurationAccepted)])
+          effects: effects)
+      } catch let error as ConfigurationError {
+        return RuntimeResponse(
+          disposition: .passThrough,
+          effects: [
+            .configurationRejected(reason: error.errorDescription ?? "invalid JSON configuration"),
+            .diagnostic(.configurationRejected),
+          ])
       } catch {
         return RuntimeResponse(
           disposition: .passThrough,
-          effects: [.configurationRejected, .diagnostic(.configurationRejected)])
+          effects: [
+            .configurationRejected(reason: decodingErrorDescription(error)),
+            .diagnostic(.configurationRejected),
+          ])
       }
     case .shutdown:
       return RuntimeResponse(disposition: .passThrough, effects: safetyExitEffects())
@@ -683,7 +787,9 @@ public final class MouselessRuntime {
       return RuntimeResponse(
         disposition: .passThrough,
         effects: [
-          .modeChanged(isEnabled: true), .indicator(isVisible: configuration.indicator.enabled),
+          .modeChanged(isEnabled: true),
+          .indicatorSizeChanged(size: configuration.indicator.size),
+          .indicator(isVisible: configuration.indicator.enabled),
         ])
     }
     guard modeEnabled, permissions.isReady else {

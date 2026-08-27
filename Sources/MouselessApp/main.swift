@@ -217,14 +217,13 @@ private final class IndicatorController {
     }
   }
   private var window: NSPanel?
-  private var size = 16.0
+  private var diameter = 16.0
   private var lastPoint: Point?
 
-  func show(size: Double) {
-    self.size = size * 2
+  func show() {
     if window == nil {
       let panel = NSPanel(
-        contentRect: NSRect(x: 0, y: 0, width: self.size, height: self.size),
+        contentRect: NSRect(x: 0, y: 0, width: diameter, height: diameter),
         styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
       panel.level = .statusBar
       panel.isOpaque = false
@@ -234,9 +233,13 @@ private final class IndicatorController {
       panel.contentView = IndicatorView(frame: panel.contentRect(forFrameRect: panel.frame))
       window = panel
     }
-    window?.setContentSize(NSSize(width: size * 2, height: size * 2))
     window?.orderFrontRegardless()
     if let lastPoint { move(to: lastPoint) }
+  }
+
+  func setSize(_ radius: Double) {
+    diameter = radius * 2
+    window?.setContentSize(NSSize(width: diameter, height: diameter))
   }
 
   func hide() { window?.orderOut(nil) }
@@ -244,7 +247,7 @@ private final class IndicatorController {
     lastPoint = point
     guard window != nil else { return }
     let cocoa = cocoaPoint(fromQuartz: CGPoint(x: point.x, y: point.y))
-    window?.setFrameOrigin(NSPoint(x: cocoa.x - size / 2, y: cocoa.y - size / 2))
+    window?.setFrameOrigin(NSPoint(x: cocoa.x - diameter / 2, y: cocoa.y - diameter / 2))
   }
 }
 
@@ -261,6 +264,7 @@ private final class MouselessApplicationController: NSObject {
   private var modeMenuItem: NSMenuItem?
   private var reloadMenuItem: NSMenuItem?
   private var configurationValid = true
+  private var configurationError: String?
   private var recoveryCount = 0
   private var lastFrameTime: TimeInterval?
   private var workspaceObservers: [NSObjectProtocol] = []
@@ -438,7 +442,8 @@ private final class MouselessApplicationController: NSObject {
     let uiEffects = response.effects.filter { effect in
       switch effect {
       case .capabilitiesChanged, .modeChanged, .indicator, .pointerMoved, .configurationAccepted,
-        .pointerPositionChanged, .configurationRejected, .eventTapShouldBeReenabled:
+        .indicatorSizeChanged, .pointerPositionChanged, .configurationRejected,
+        .eventTapShouldBeReenabled:
         return true
       default: return false
       }
@@ -469,17 +474,18 @@ private final class MouselessApplicationController: NSObject {
       case .modeChanged(let isEnabled):
         modeMenuItem?.title = "Free mode: \(isEnabled ? "On" : "Off")"
         logger.info("Free mode changed: enabled=\(isEnabled)")
-      case .indicator(let isVisible): isVisible ? indicator.show(size: 8) : indicator.hide()
+      case .indicator(let isVisible): isVisible ? indicator.show() : indicator.hide()
+      case .indicatorSizeChanged(let size): indicator.setSize(size)
       case .pointerPositionChanged(to: let point): indicator.move(to: point)
       case .pointerMoved(to: let point, buttons: _): indicator.move(to: point)
       case .configurationAccepted:
         configurationValid = true
+        configurationError = nil
         reloadMenuItem?.title = "Reload Configuration"
+        reloadMenuItem?.toolTip = nil
         logger.info("Configuration accepted")
-      case .configurationRejected:
-        configurationValid = false
-        reloadMenuItem?.title = "Reload Configuration (invalid)"
-        logger.error("Configuration rejected")
+      case .configurationRejected(let reason):
+        showConfigurationError(reason)
       case .eventTapShouldBeReenabled:
         recoveryCount += 1
         eventTap?.reenable()
@@ -515,9 +521,21 @@ private final class MouselessApplicationController: NSObject {
       }
       apply(runtimeResponse(for: .configuration(try Data(contentsOf: url))))
     } catch {
-      configurationValid = false
-      reloadMenuItem?.title = "Reload Configuration (unreadable)"
+      showConfigurationError("could not read configuration: \(error.localizedDescription)")
     }
+  }
+
+  private func showConfigurationError(_ message: String) {
+    configurationValid = false
+    configurationError = message
+    reloadMenuItem?.title = "Reload Configuration: \(configurationMenuMessage(message))"
+    reloadMenuItem?.toolTip = message
+    logger.error("Configuration unavailable")
+  }
+
+  private func configurationMenuMessage(_ message: String) -> String {
+    let limit = 64
+    return message.count <= limit ? message : String(message.prefix(limit - 1)) + "…"
   }
 
   private func configurationURL() -> URL {
@@ -532,8 +550,9 @@ private final class MouselessApplicationController: NSObject {
 
   @objc private func copyDiagnostics() {
     let state = permissions.current(prompt: false)
+    let configurationErrorDescription = configurationError ?? "none"
     let summary =
-      "Mouseless\npermissions: accessibility=\(state.accessibility), listenEvent=\(state.listenEvent), postEvent=\(state.postEvent)\nconfigurationValid: \(configurationValid)\neventTapRecoveries: \(recoveryCount)"
+      "Mouseless\npermissions: accessibility=\(state.accessibility), listenEvent=\(state.listenEvent), postEvent=\(state.postEvent)\nconfigurationValid: \(configurationValid)\nconfigurationError: \(configurationErrorDescription)\neventTapRecoveries: \(recoveryCount)"
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(summary, forType: .string)
   }
