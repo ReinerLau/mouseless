@@ -10,7 +10,14 @@ Install [XcodeGen](https://github.com/yonaskolb/XcodeGen), make sure the local c
 ./Scripts/build-and-run.sh
 ```
 
-The script generates the Xcode project from `project.yml`, builds with the fixed bundle identifier `com.reinerlau.mouseless`, verifies the designated requirement and Hardened Runtime, then launches the menu-bar agent. The signature/TCC smoke-test conclusion is recorded in `docs/adr/0001-use-a-fixed-local-signing-identity.md`; the interactive TCC checks are documented in the prototype branch referenced there.
+To produce the reproducible signed daily-use candidate, including the runtime
+test suite, Release build, designated-requirement check, and candidate manifest:
+
+```sh
+./Scripts/candidate-build.sh
+```
+
+The build-and-run script generates the Xcode project from `project.yml`, builds with the fixed bundle identifier `com.reinerlau.mouseless`, verifies the designated requirement and Hardened Runtime, then launches the menu-bar agent. The signature/TCC smoke-test conclusion is recorded in `docs/adr/0001-use-a-fixed-local-signing-identity.md`; the interactive TCC checks are documented in the prototype branch referenced there.
 
 Run the deterministic runtime suite with:
 
@@ -33,3 +40,15 @@ without replacing the last valid runtime configuration. The interactive real-app
 For lock-screen, sleep, permission-loss, and event-tap recovery checks, run
 `./Scripts/recovery-smoke-test.sh`. These cases require system interaction and are recorded as an
 operator checklist; after each fault, free mode must remain off until explicitly re-enabled.
+
+The complete Issue #11 feature, performance, and seven-day operator record is
+`docs/candidate-acceptance.md`. After building a candidate, measure its idle,
+continuous-movement CPU, and resident memory budgets with:
+
+```sh
+./Scripts/performance-smoke-test.sh build/candidate/Build/Products/Release/Mouseless.app
+```
+
+Callback latency is checked from a Debug diagnostic summary with
+`./Scripts/diagnostic-budget-check.sh`; the Release candidate's fixed identity
+and TCC prerequisites are checked by `candidate-build.sh` and `tcc-smoke-test.sh`.

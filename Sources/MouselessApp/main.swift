@@ -460,23 +460,19 @@ private final class MouselessApplicationController: NSObject {
 
   private func handleTapEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
     let callbackStarted = CACurrentMediaTime()
-    defer {
-      if let batchCount = diagnostics.recordCallback(duration: CACurrentMediaTime() - callbackStarted) {
-        logger.debug("Event tap callback metrics: callbacks=\(batchCount)")
-      }
-    }
+    defer { _ = diagnostics.recordCallback(duration: CACurrentMediaTime() - callbackStarted) }
     if event.getIntegerValueField(.eventSourceUserData) == synthesizedEventMarker {
       return Unmanaged.passUnretained(event)
     }
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
       let response = runtimeResponse(for: .eventTapDisabled)
-      apply(response)
+      enqueue(response)
       guard response.effects.contains(.eventTapShouldBeReenabled) else {
         return Unmanaged.passUnretained(event)
       }
       let host = currentEventTap()
       let recovered = host?.reenable() ?? false
-      apply(runtimeResponse(for: recovered ? .eventTapReenabled : .eventTapRecoveryFailed))
+      enqueue(runtimeResponse(for: recovered ? .eventTapReenabled : .eventTapRecoveryFailed))
       if !recovered {
         // EventTapHost.stop waits for its run-loop thread, so stop the failed host after this
         // callback returns instead of blocking the tap callback itself.
@@ -509,7 +505,7 @@ private final class MouselessApplicationController: NSObject {
         for: .pointerMoved(to: Point(x: event.location.x, y: event.location.y)))
     default: response = RuntimeResponse(disposition: .passThrough)
     }
-    apply(response)
+    enqueue(response)
     return response.disposition == .consume ? nil : Unmanaged.passUnretained(event)
   }
 
@@ -517,6 +513,10 @@ private final class MouselessApplicationController: NSObject {
     runtimeLock.lock()
     defer { runtimeLock.unlock() }
     return runtime.handle(event)
+  }
+
+  private func enqueue(_ response: RuntimeResponse) {
+    DispatchQueue.main.async { [weak self] in self?.apply(response) }
   }
 
   private func registerLifecycleObservers() {
