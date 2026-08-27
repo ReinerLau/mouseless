@@ -42,6 +42,64 @@ private func movePointerToTestOrigin() {
   event.post(tap: .cghidEventTap)
 }
 
+private func activeDisplayBounds() -> [CGRect] {
+  var count: UInt32 = 0
+  let maxDisplays: UInt32 = 32
+  var displays = [CGDirectDisplayID](repeating: 0, count: Int(maxDisplays))
+  guard CGGetActiveDisplayList(maxDisplays, &displays, &count) == .success else { return [] }
+  return displays.prefix(Int(count)).map { CGDisplayBounds($0) }
+}
+
+private func verifyHorizontalMultiDisplayMotion() -> Bool {
+  let bounds = activeDisplayBounds()
+  guard let pair = bounds
+    .flatMap({ left in bounds.compactMap { right -> (CGRect, CGRect)? in
+      guard right.origin.x >= left.maxX,
+        right.minY < left.maxY, left.minY < right.maxY
+      else { return nil }
+      return (left, right)
+    }})
+    .min(by: { $0.1.origin.x - $0.0.maxX < $1.1.origin.x - $1.0.maxX })
+  else {
+    print("Skipping multi-display topology motion: no horizontally reachable display pair.")
+    return true
+  }
+
+  let left = pair.0
+  let right = pair.1
+  let overlapMinY = max(left.minY, right.minY)
+  let overlapMaxY = min(left.maxY, right.maxY)
+  let y = (overlapMinY + overlapMaxY) / 2
+  let start = CGPoint(x: left.maxX - 16, y: y)
+  guard
+    let event = CGEvent(
+      mouseEventSource: eventSource, mouseType: .mouseMoved, mouseCursorPosition: start,
+      mouseButton: .left)
+  else { return false }
+  event.post(tap: .cghidEventTap)
+  Thread.sleep(forTimeInterval: 0.1)
+
+  postKey(optionKey, isDown: true)
+  Thread.sleep(forTimeInterval: 0.05)
+  postKey(optionKey, isDown: false)
+  Thread.sleep(forTimeInterval: 0.1)
+  postKey(lKey, isDown: true)
+  Thread.sleep(forTimeInterval: min(max((right.maxX - start.x) / 250 + 1, 1), 8))
+  postKey(lKey, isDown: false)
+  Thread.sleep(forTimeInterval: 0.1)
+  let end = pointerLocation()
+  tapOption()
+
+  guard end.x >= right.minX - 16 else {
+    fputs(
+      String(format: "FAIL: pointer did not cross into the adjacent display (x=%.1f, boundary=%.1f).\n", end.x, right.minX),
+      stderr)
+    return false
+  }
+  print("PASS: keyboard motion crossed the detected multi-display boundary.")
+  return true
+}
+
 private func indicatorCenter() -> CGPoint? {
   guard
     let process = NSRunningApplication.runningApplications(
@@ -76,6 +134,7 @@ private func displacement(for keys: [CGKeyCode], duration: TimeInterval = 0.35) 
 func run() -> Int32 {
   print("Starting real-app motion smoke test; normalizing free mode state.")
   if indicatorCenter() != nil { tapOption() }
+  guard verifyHorizontalMultiDisplayMotion() else { return 1 }
   tapOption()
 
   let pointer = pointerLocation()

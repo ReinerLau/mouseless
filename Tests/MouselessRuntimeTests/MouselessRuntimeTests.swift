@@ -312,7 +312,7 @@ final class MouselessRuntimeTests: XCTestCase {
     _ = runtime.handle(.keyUp(.l, at: 3))
     _ = runtime.handle(.keyDown(.j, at: 3.1))
 
-    let response = runtime.handle(.frame(deltaTime: 0.2))
+    let response = runtime.handle(.frame(deltaTime: 1.0 / 60.0))
     let point = try XCTUnwrap(pointer(from: response))
     XCTAssertLessThan(point.x, 100)
     XCTAssertEqual(point.y, 50, accuracy: 0.001)
@@ -339,6 +339,26 @@ final class MouselessRuntimeTests: XCTestCase {
     }
 
     XCTAssertEqual(try XCTUnwrap(lastPoint).x, 300, accuracy: 1)
+  }
+
+  func testMovementCrossesAnOffsetDisplayWithADifferentSize() throws {
+    let topology = DisplayTopology(regions: [
+      DisplayRegion(x: -500, y: -200, width: 500, height: 400),
+      DisplayRegion(x: 100, y: -50, width: 800, height: 200),
+    ])
+    let runtime = MouselessRuntime(
+      permissions: .allGranted, topology: topology, pointer: Point(x: -250, y: 0))
+    enterFreeMode(runtime)
+    _ = runtime.handle(.keyDown(.l, at: 1))
+
+    var lastPoint: Point?
+    for _ in 0..<240 {
+      if let point = pointer(from: runtime.handle(.frame(deltaTime: 1.0 / 60.0))) {
+        lastPoint = point
+      }
+    }
+
+    XCTAssertEqual(try XCTUnwrap(lastPoint).x, 900, accuracy: 1)
   }
 
   func testTopologyChangeRepositionsAPointOutsideTheNewDisplays() {

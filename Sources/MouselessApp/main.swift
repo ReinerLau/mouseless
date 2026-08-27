@@ -265,6 +265,7 @@ private final class MouselessApplicationController: NSObject {
   private var lastFrameTime: TimeInterval?
   private var workspaceObservers: [NSObjectProtocol] = []
   private var permissionCheckTime = 0.0
+  private var lastKnownTopology = DisplayTopology.unrestricted
 
   func start() {
     executor.releaseAllButtons(waitUntilPosted: true)
@@ -420,14 +421,17 @@ private final class MouselessApplicationController: NSObject {
     let maxDisplays: UInt32 = 32
     var displays = [CGDirectDisplayID](repeating: 0, count: Int(maxDisplays))
     guard CGGetActiveDisplayList(maxDisplays, &displays, &displayCount) == .success else {
-      return .unrestricted
+      logger.error("Could not read active display topology; retaining the last known topology")
+      return lastKnownTopology
     }
-    return DisplayTopology(
+    let topology = DisplayTopology(
       regions: displays.prefix(Int(displayCount)).map { display in
         let bounds = CGDisplayBounds(display)
         return DisplayRegion(
           x: bounds.origin.x, y: bounds.origin.y, width: bounds.width, height: bounds.height)
       })
+    lastKnownTopology = topology
+    return topology
   }
 
   private func apply(_ response: RuntimeResponse) {

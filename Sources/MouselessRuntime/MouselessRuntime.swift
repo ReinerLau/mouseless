@@ -637,6 +637,20 @@ public final class MouselessRuntime {
     guard modeEnabled, permissions.isReady else {
       return RuntimeResponse(disposition: .passThrough)
     }
+    if !isAutoRepeat {
+      if key == configurationKey(named: configuration.bindings.moveLeft), movementVelocity.x > 0 {
+        movementVelocity.x = 0
+      }
+      if key == configurationKey(named: configuration.bindings.moveRight), movementVelocity.x < 0 {
+        movementVelocity.x = 0
+      }
+      if key == configurationKey(named: configuration.bindings.moveUp), movementVelocity.y < 0 {
+        movementVelocity.y = 0
+      }
+      if key == configurationKey(named: configuration.bindings.moveDown), movementVelocity.y > 0 {
+        movementVelocity.y = 0
+      }
+    }
     if key == configurationKey(named: configuration.bindings.escape) {
       return RuntimeResponse(disposition: .consume, effects: safetyExitEffects())
     }
