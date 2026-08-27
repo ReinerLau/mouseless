@@ -277,6 +277,115 @@ final class MouselessRuntimeTests: XCTestCase {
     XCTAssertEqual(point.x, 100, accuracy: 0.001)
   }
 
+  func testMovementCrossesAGapBetweenDisplays() {
+    let topology = DisplayTopology(regions: [
+      DisplayRegion(x: 0, y: 0, width: 100, height: 100),
+      DisplayRegion(x: 200, y: 0, width: 100, height: 100),
+    ])
+    let runtime = MouselessRuntime(
+      permissions: .allGranted, topology: topology, pointer: Point(x: 50, y: 50))
+    enterFreeMode(runtime)
+    _ = runtime.handle(.keyDown(.l, at: 1))
+
+    var lastPoint: Point?
+    for _ in 0..<60 {
+      if let point = pointer(from: runtime.handle(.frame(deltaTime: 1.0 / 60.0))) {
+        lastPoint = point
+      }
+    }
+
+    guard let point = lastPoint else {
+      return XCTFail("expected movement onto the second display")
+    }
+    XCTAssertEqual(point.x, 300, accuracy: 1)
+  }
+
+  func testMovementStopsAtAnOuterEdgeWithoutHiddenDisplacement() throws {
+    let topology = DisplayTopology(regions: [
+      DisplayRegion(x: 0, y: 0, width: 100, height: 100),
+    ])
+    let runtime = MouselessRuntime(
+      permissions: .allGranted, topology: topology, pointer: Point(x: 50, y: 50))
+    enterFreeMode(runtime)
+    _ = runtime.handle(.keyDown(.l, at: 1))
+    for _ in 0..<120 { _ = runtime.handle(.frame(deltaTime: 1.0 / 60.0)) }
+    _ = runtime.handle(.keyUp(.l, at: 3))
+    _ = runtime.handle(.keyDown(.j, at: 3.1))
+
+    let response = runtime.handle(.frame(deltaTime: 0.2))
+    let point = try XCTUnwrap(pointer(from: response))
+    XCTAssertLessThan(point.x, 100)
+    XCTAssertEqual(point.y, 50, accuracy: 0.001)
+  }
+
+  func testMovementUsesAChangedDisplayTopologyImmediately() throws {
+    let runtime = MouselessRuntime(
+      permissions: .allGranted,
+      topology: DisplayTopology(regions: [DisplayRegion(x: 0, y: 0, width: 100, height: 100)]),
+      pointer: Point(x: 50, y: 50))
+    enterFreeMode(runtime)
+    _ = runtime.handle(.frame(deltaTime: 0))
+    _ = runtime.handle(.topologyChanged(DisplayTopology(regions: [
+      DisplayRegion(x: 0, y: 0, width: 100, height: 100),
+      DisplayRegion(x: 200, y: 0, width: 100, height: 100),
+    ])))
+    _ = runtime.handle(.keyDown(.l, at: 1))
+
+    var lastPoint: Point?
+    for _ in 0..<60 {
+      if let point = pointer(from: runtime.handle(.frame(deltaTime: 1.0 / 60.0))) {
+        lastPoint = point
+      }
+    }
+
+    XCTAssertEqual(try XCTUnwrap(lastPoint).x, 300, accuracy: 1)
+  }
+
+  func testTopologyChangeRepositionsAPointOutsideTheNewDisplays() {
+    let runtime = MouselessRuntime(
+      permissions: .allGranted,
+      topology: DisplayTopology(regions: [DisplayRegion(x: -500, y: -300, width: 500, height: 300)]),
+      pointer: Point(x: -100, y: -100))
+
+    let response = runtime.handle(.topologyChanged(DisplayTopology(regions: [
+      DisplayRegion(x: 100, y: -200, width: 500, height: 400),
+    ])))
+
+    XCTAssertEqual(response.effects, [.pointerPositionChanged(to: Point(x: 100, y: -100))])
+  }
+
+  func testMovementSupportsNegativeGlobalCoordinates() throws {
+    let topology = DisplayTopology(regions: [
+      DisplayRegion(x: -1_280, y: -200, width: 1_280, height: 800),
+    ])
+    let runtime = MouselessRuntime(
+      permissions: .allGranted, topology: topology, pointer: Point(x: -100, y: 0))
+    enterFreeMode(runtime)
+    _ = runtime.handle(.keyDown(.j, at: 1))
+
+    var lastPoint: Point?
+    for _ in 0..<240 {
+      if let point = pointer(from: runtime.handle(.frame(deltaTime: 1.0 / 60.0))) {
+        lastPoint = point
+      }
+    }
+
+    let point = try XCTUnwrap(lastPoint)
+    XCTAssertEqual(point.x, -1_280, accuracy: 0.2)
+    XCTAssertEqual(point.y, 0, accuracy: 0.001)
+  }
+
+  func testKeyboardMovementContinuesFromAPhysicalPointerPosition() throws {
+    let runtime = MouselessRuntime(permissions: .allGranted)
+    let physical = runtime.handle(.pointerMoved(to: Point(x: -240, y: 180)))
+    XCTAssertEqual(physical.effects, [.pointerPositionChanged(to: Point(x: -240, y: 180))])
+
+    enterFreeMode(runtime)
+    _ = runtime.handle(.keyDown(.l, at: 1))
+    let response = runtime.handle(.frame(deltaTime: 0.2))
+    XCTAssertGreaterThan(try XCTUnwrap(pointer(from: response)).x, -240)
+  }
+
   func testScrollAccumulatesSubpixelDeltasAndSupportsDiagonalInput() {
     let runtime = MouselessRuntime(permissions: .allGranted)
     enterFreeMode(runtime)

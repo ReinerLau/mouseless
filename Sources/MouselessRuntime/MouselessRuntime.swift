@@ -50,6 +50,45 @@ public struct DisplayTopology: Equatable, Sendable {
       .map { ($0.closestPoint(to: point), squaredDistance($0.closestPoint(to: point), point)) }
       .min { $0.1 < $1.1 }?.0 ?? point
   }
+
+  fileprivate func constrainedMotionPoint(from start: Point, to candidate: Point) -> Point {
+    guard !regions.isEmpty else { return candidate }
+
+    let delta = candidate - start
+    let distance = sqrt(delta.x * delta.x + delta.y * delta.y)
+    guard distance > 0 else { return start }
+    let direction = delta * (1 / distance)
+    let furthestReachableDistance = regions.compactMap {
+      rayIntersectionInterval(from: start, direction: direction, with: $0)?.upperBound
+    }.max()
+
+    guard let furthestReachableDistance else { return projected(start) }
+    return distance <= furthestReachableDistance
+      ? candidate
+      : start + direction * furthestReachableDistance
+  }
+
+  private func rayIntersectionInterval(
+    from start: Point, direction: Point, with region: DisplayRegion
+  ) -> ClosedRange<Double>? {
+    var lower = 0.0
+    var upper = Double.infinity
+    for (position, velocity, minimum, maximum) in [
+      (start.x, direction.x, region.origin.x, region.origin.x + region.width),
+      (start.y, direction.y, region.origin.y, region.origin.y + region.height),
+    ] {
+      if abs(velocity) < 0.0000001 {
+        guard position >= minimum && position <= maximum else { return nil }
+        continue
+      }
+      let first = (minimum - position) / velocity
+      let second = (maximum - position) / velocity
+      lower = max(lower, min(first, second))
+      upper = min(upper, max(first, second))
+      if lower > upper { return nil }
+    }
+    return lower <= upper ? lower...upper : nil
+  }
 }
 
 private func squaredDistance(_ lhs: Point, _ rhs: Point) -> Double {
@@ -506,6 +545,7 @@ public final class MouselessRuntime {
   private var modeEnabled = false
   private var topology: DisplayTopology
   private var pointer = Point(x: 0, y: 0)
+  private var movementPoint = Point(x: 0, y: 0)
   private var pressedKeys: Set<Key> = []
   private var heldButtons: Set<MouseButton> = []
   private var optionDownAt: TimeInterval?
@@ -523,6 +563,7 @@ public final class MouselessRuntime {
     self.permissions = permissions
     self.topology = topology
     self.pointer = topology.projected(pointer)
+    self.movementPoint = self.pointer
   }
 
   public func handle(_ event: RuntimeEvent) -> RuntimeResponse {
@@ -540,12 +581,19 @@ public final class MouselessRuntime {
         return RuntimeResponse(disposition: .passThrough)
       }
       pointer = topology.projected(point)
+      movementPoint = pointer
       return RuntimeResponse(
         disposition: .passThrough, effects: [.pointerPositionChanged(to: pointer)])
     case .topologyChanged(let newTopology):
       topology = newTopology
-      pointer = topology.projected(pointer)
-      return RuntimeResponse(disposition: .passThrough)
+      let projected = topology.projected(pointer)
+      movementPoint = projected
+      guard projected != pointer else {
+        return RuntimeResponse(disposition: .passThrough)
+      }
+      pointer = projected
+      return RuntimeResponse(
+        disposition: .passThrough, effects: [.pointerPositionChanged(to: pointer)])
     case .permissionsChanged(let newPermissions):
       permissions = newPermissions
       var effects = [RuntimeEffect.capabilitiesChanged(newPermissions)]
@@ -647,8 +695,9 @@ public final class MouselessRuntime {
       timeConstant: configuration.movement.smoothingMilliseconds / 1_000)
     var effects: [RuntimeEffect] = []
     let candidate = Point(
-      x: pointer.x + movementVelocity.x * dt, y: pointer.y + movementVelocity.y * dt)
-    let projected = topology.projected(candidate)
+      x: movementPoint.x + movementVelocity.x * dt, y: movementPoint.y + movementVelocity.y * dt)
+    movementPoint = topology.constrainedMotionPoint(from: movementPoint, to: candidate)
+    let projected = topology.projected(movementPoint)
     if projected != pointer {
       pointer = projected
       effects.append(.pointerMoved(to: pointer, buttons: heldButtons))

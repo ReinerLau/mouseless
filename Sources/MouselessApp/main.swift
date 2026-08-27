@@ -10,15 +10,15 @@ private let synthesizedEventMarker: Int64 = 0x4D4F_5553_4C45_5353
 private let logger = Logger(subsystem: "com.reinerlau.mouseless", category: "runtime")
 
 private func primaryScreenTop() -> CGFloat {
-  NSScreen.screens.first?.frame.maxY ?? 0
+  CGDisplayBounds(CGMainDisplayID()).maxY
 }
 
 private func cocoaPoint(fromQuartz point: CGPoint) -> Point {
   Point(x: point.x, y: primaryScreenTop() - point.y)
 }
 
-private func quartzPoint(fromCocoa point: Point) -> CGPoint {
-  CGPoint(x: point.x, y: primaryScreenTop() - point.y)
+private func quartzPoint(fromRuntime point: Point) -> CGPoint {
+  CGPoint(x: point.x, y: point.y)
 }
 
 private final class SystemPermissionProvider {
@@ -71,11 +71,11 @@ private final class CoreGraphicsEffectExecutor {
     switch effect {
     case .pointerMoved(to: let point, let buttons):
       if buttons.isEmpty {
-        postMouse(type: .mouseMoved, point: quartzPoint(fromCocoa: point), button: .left)
+        postMouse(type: .mouseMoved, point: quartzPoint(fromRuntime: point), button: .left)
       } else {
         for button in buttons.sorted(by: { $0.rawValue < $1.rawValue }) {
           postMouse(
-            type: draggedType(for: button), point: quartzPoint(fromCocoa: point),
+            type: draggedType(for: button), point: quartzPoint(fromRuntime: point),
             button: cgButton(for: button))
         }
       }
@@ -243,7 +243,8 @@ private final class IndicatorController {
   func move(to point: Point) {
     lastPoint = point
     guard window != nil else { return }
-    window?.setFrameOrigin(NSPoint(x: point.x - size / 2, y: point.y - size / 2))
+    let cocoa = cocoaPoint(fromQuartz: CGPoint(x: point.x, y: point.y))
+    window?.setFrameOrigin(NSPoint(x: cocoa.x - size / 2, y: cocoa.y - size / 2))
   }
 }
 
@@ -270,9 +271,8 @@ private final class MouselessApplicationController: NSObject {
     configureMenu()
     reloadConfiguration(createIfMissing: true)
     apply(runtimeResponse(for: .topologyChanged(currentTopology())))
-    apply(
-      runtimeResponse(
-        for: .pointerMoved(to: cocoaPoint(fromQuartz: CGEvent(source: nil)?.location ?? .zero))))
+    let initialPointer = CGEvent(source: nil)?.location ?? .zero
+    apply(runtimeResponse(for: .pointerMoved(to: Point(x: initialPointer.x, y: initialPointer.y))))
     registerLifecycleObservers()
     checkPermissions(prompt: true)
     displayLink = NSScreen.main?.displayLink(target: self, selector: #selector(frame(_:)))
@@ -378,7 +378,7 @@ private final class MouselessApplicationController: NSObject {
           key, isPressed: event.flags.contains(.maskAlternate), at: timestamp))
     case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
       response = runtimeResponse(
-        for: .pointerMoved(to: cocoaPoint(fromQuartz: event.location)))
+        for: .pointerMoved(to: Point(x: event.location.x, y: event.location.y)))
     default: response = RuntimeResponse(disposition: .passThrough)
     }
     apply(response)
@@ -416,11 +416,17 @@ private final class MouselessApplicationController: NSObject {
   }
 
   private func currentTopology() -> DisplayTopology {
-    DisplayTopology(
-      regions: NSScreen.screens.map { screen in
-        DisplayRegion(
-          x: screen.frame.origin.x, y: screen.frame.origin.y, width: screen.frame.width,
-          height: screen.frame.height)
+    var displayCount: UInt32 = 0
+    let maxDisplays: UInt32 = 32
+    var displays = [CGDirectDisplayID](repeating: 0, count: Int(maxDisplays))
+    guard CGGetActiveDisplayList(maxDisplays, &displays, &displayCount) == .success else {
+      return .unrestricted
+    }
+    return DisplayTopology(
+      regions: displays.prefix(Int(displayCount)).map { display in
+        let bounds = CGDisplayBounds(display)
+        return DisplayRegion(
+          x: bounds.origin.x, y: bounds.origin.y, width: bounds.width, height: bounds.height)
       })
   }
 
