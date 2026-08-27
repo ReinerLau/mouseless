@@ -783,8 +783,8 @@ public final class MouselessRuntime {
       (pressedKeys.contains(configurationKey(named: configuration.bindings.moveRight)) ? 1.0 : 0)
       - (pressedKeys.contains(configurationKey(named: configuration.bindings.moveLeft)) ? 1.0 : 0)
     let y =
-      (pressedKeys.contains(configurationKey(named: configuration.bindings.moveUp)) ? 1.0 : 0)
-      - (pressedKeys.contains(configurationKey(named: configuration.bindings.moveDown)) ? 1.0 : 0)
+      (pressedKeys.contains(configurationKey(named: configuration.bindings.moveDown)) ? 1.0 : 0)
+      - (pressedKeys.contains(configurationKey(named: configuration.bindings.moveUp)) ? 1.0 : 0)
     return normalized(Point(x: x, y: y))
   }
 

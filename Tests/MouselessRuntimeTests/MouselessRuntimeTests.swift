@@ -86,7 +86,7 @@ final class MouselessRuntimeTests: XCTestCase {
         if case .pointerMoved = $0 { return true }
         return false
       }) {
-        oneAxisDistance = point.y - 100
+        oneAxisDistance = 100 - point.y
       }
     }
 
@@ -105,7 +105,21 @@ final class MouselessRuntimeTests: XCTestCase {
     else { return XCTFail("expected diagonal movement") }
 
     XCTAssertEqual(point.x - 100, 39.3, accuracy: 0.4)
-    XCTAssertEqual(point.y - 100, 39.3, accuracy: 0.4)
+    XCTAssertEqual(100 - point.y, 39.3, accuracy: 0.4)
+  }
+
+  func testQuartzVerticalBindingsMapIToUpAndKToDown() throws {
+    let up = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 100, y: 100))
+    enterFreeMode(up)
+    _ = up.handle(.keyDown(.i, at: 1))
+    let upPoint = try XCTUnwrap(pointer(from: up.handle(.frame(deltaTime: 0.2))))
+    XCTAssertLessThan(upPoint.y, 100)
+
+    let down = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 100, y: 100))
+    enterFreeMode(down)
+    _ = down.handle(.keyDown(.k, at: 1))
+    let downPoint = try XCTUnwrap(pointer(from: down.handle(.frame(deltaTime: 0.2))))
+    XCTAssertGreaterThan(downPoint.y, 100)
   }
 
   func testPhysicalPointerMovementProducesAnIndicatorPositionUpdate() {
