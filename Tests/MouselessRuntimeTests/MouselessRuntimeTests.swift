@@ -2,6 +2,10 @@ import XCTest
 
 @testable import MouselessRuntime
 
+private let buttonBindings: [(Key, MouseButton)] = [
+  (.space, .left), (.r, .right), (.e, .middle), (.q, .back), (.w, .forward),
+]
+
 final class MouselessRuntimeTests: XCTestCase {
   func testMissingPermissionPassesThroughKeysAndCannotEnterFreeMode() {
     let runtime = MouselessRuntime(permissions: .none)
@@ -258,6 +262,148 @@ final class MouselessRuntimeTests: XCTestCase {
     XCTAssertTrue(tapExit.effects.contains(.modeChanged(isEnabled: false)))
   }
 
+  func testAllFiveButtonBindingsProducePairedEdges() {
+    for (key, button) in buttonBindings {
+      let runtime = MouselessRuntime(permissions: .allGranted)
+      enterFreeMode(runtime)
+
+      let down = runtime.handle(.keyDown(key, at: 1))
+      let repeatDown = runtime.handle(.keyDown(key, at: 1.1, isAutoRepeat: true))
+      let up = runtime.handle(.keyUp(key, at: 1.2))
+
+      XCTAssertEqual(down.disposition, .consume)
+      XCTAssertEqual(down.effects, [.mouseButton(button, .down)])
+      XCTAssertEqual(repeatDown.disposition, .consume)
+      XCTAssertTrue(repeatDown.effects.isEmpty)
+      XCTAssertEqual(up.disposition, .consume)
+      XCTAssertEqual(up.effects, [.mouseButton(button, .up)])
+    }
+  }
+
+  func testLongPressKeepsEachButtonHeldUntilKeyUp() {
+    for (key, button) in buttonBindings {
+      let runtime = MouselessRuntime(permissions: .allGranted)
+      enterFreeMode(runtime)
+      XCTAssertEqual(runtime.handle(.keyDown(key, at: 1)).effects, [.mouseButton(button, .down)])
+      for frame in 0..<10 {
+        XCTAssertTrue(
+          runtime.handle(.keyDown(key, at: 1.1 + Double(frame) * 0.1, isAutoRepeat: true))
+            .effects.isEmpty)
+      }
+      XCTAssertEqual(runtime.handle(.keyUp(key, at: 2.2)).effects, [.mouseButton(button, .up)])
+    }
+  }
+
+  func testButtonBindingsPassThroughOutsideFreeMode() {
+    let bindings: [Key] = [.space, .r, .e, .q, .w]
+    let runtime = MouselessRuntime(permissions: .allGranted)
+
+    for key in bindings {
+      XCTAssertEqual(runtime.handle(.keyDown(key, at: 1)).disposition, .passThrough)
+      XCTAssertEqual(runtime.handle(.keyUp(key, at: 1.1)).disposition, .passThrough)
+    }
+  }
+
+  func testHeldButtonsTurnKeyboardMovementIntoDraggedEvents() throws {
+    let runtime = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 100, y: 100))
+    enterFreeMode(runtime)
+    _ = runtime.handle(.keyDown(.space, at: 1))
+    _ = runtime.handle(.keyDown(.l, at: 1.1))
+
+    let response = runtime.handle(.frame(deltaTime: 0.2))
+    guard
+      case .pointerMoved(to: let point, buttons: let buttons) = response.effects.first(where: {
+        if case .pointerMoved = $0 { return true }
+        return false
+      })
+    else { return XCTFail("expected a dragged pointer movement") }
+
+    XCTAssertEqual(buttons, [.left])
+    XCTAssertGreaterThan(point.x, 100)
+    XCTAssertEqual(runtime.handle(.keyUp(.l, at: 1.3)).effects, [])
+    XCTAssertEqual(runtime.handle(.keyUp(.space, at: 1.4)).effects, [.mouseButton(.left, .up)])
+  }
+
+  func testEveryHeldButtonProducesItsOwnDraggedEvent() throws {
+    for (key, button) in buttonBindings {
+      let runtime = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 100, y: 100))
+      enterFreeMode(runtime)
+      _ = runtime.handle(.keyDown(key, at: 1))
+      _ = runtime.handle(.keyDown(.l, at: 1.1))
+
+      let response = runtime.handle(.frame(deltaTime: 0.2))
+      guard
+        case .pointerMoved(to: _, buttons: let buttons) = response.effects.first(where: {
+          if case .pointerMoved = $0 { return true }
+          return false
+        })
+      else { return XCTFail("expected a dragged pointer movement for \(button)") }
+
+      XCTAssertEqual(buttons, [button])
+    }
+  }
+
+  func testMultipleButtonsRemainIndependentAndSafetyExitBalancesEverySequence() {
+    var seed: UInt64 = 0x6_0000_0000_0001
+    func nextRandom() -> UInt64 {
+      seed = seed &* 2_862_933_555_777_941_757 &+ 3_037_000_493
+      return seed
+    }
+
+    for sequenceIndex in 0..<128 {
+      let runtime = MouselessRuntime(permissions: .allGranted)
+      enterFreeMode(runtime)
+      var effects: [RuntimeEffect] = []
+      for step in 0..<32 {
+        let (key, _) = buttonBindings[Int(nextRandom() % UInt64(buttonBindings.count))]
+        let timestamp = Double(sequenceIndex * 32 + step) + 1
+        switch nextRandom() % 3 {
+        case 0:
+          effects += runtime.handle(.keyDown(key, at: timestamp)).effects
+        case 1:
+          effects += runtime.handle(.keyDown(key, at: timestamp, isAutoRepeat: true)).effects
+        default:
+          effects += runtime.handle(.keyUp(key, at: timestamp)).effects
+        }
+      }
+      effects += runtime.handle(.keyDown(.escape, at: 10_000)).effects
+
+      var balances = Dictionary(uniqueKeysWithValues: MouseButton.allCases.map { ($0, 0) })
+      for effect in effects {
+        guard case .mouseButton(let button, let phase) = effect else { continue }
+        balances[button, default: 0] += phase == .down ? 1 : -1
+        XCTAssertGreaterThanOrEqual(balances[button, default: 0], 0)
+      }
+      XCTAssertTrue(balances.values.allSatisfy { $0 == 0 })
+      for (key, _) in buttonBindings {
+        XCTAssertEqual(runtime.handle(.keyUp(key, at: 10_001)).disposition, .passThrough)
+      }
+
+      enterFreeMode(runtime)
+      for (key, button) in buttonBindings {
+        XCTAssertEqual(
+          runtime.handle(.keyDown(key, at: 10_002)).effects, [.mouseButton(button, .down)])
+        XCTAssertEqual(
+          runtime.handle(.keyUp(key, at: 10_003)).effects, [.mouseButton(button, .up)])
+      }
+      _ = runtime.handle(.keyDown(.escape, at: 10_004))
+    }
+  }
+
+  func testButtonReleaseOrderRemainsMappedToEachButton() {
+    let runtime = MouselessRuntime(permissions: .allGranted)
+    enterFreeMode(runtime)
+    for (index, binding) in buttonBindings.enumerated() {
+      _ = runtime.handle(.keyDown(binding.0, at: Double(index) + 1))
+    }
+
+    for (index, binding) in buttonBindings.reversed().enumerated() {
+      XCTAssertEqual(
+        runtime.handle(.keyUp(binding.0, at: Double(index) + 10)).effects,
+        [.mouseButton(binding.1, .up)])
+    }
+  }
+
   func testPermissionLossAndInactiveSessionSafelyReleaseButtons() {
     let runtime = MouselessRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
@@ -269,6 +415,38 @@ final class MouselessRuntimeTests: XCTestCase {
 
     let inactive = runtime.handle(.sessionChanged(.inactive))
     XCTAssertTrue(inactive.effects.isEmpty)
+  }
+
+  func testSafetyEventsReleaseEveryHeldVirtualButton() {
+    let runtime = MouselessRuntime(permissions: .allGranted)
+    enterFreeMode(runtime)
+    for (index, binding) in buttonBindings.enumerated() {
+      _ = runtime.handle(.keyDown(binding.0, at: Double(index) + 1))
+    }
+
+    let inactive = runtime.handle(.sessionChanged(.inactive))
+    let released = inactive.effects.compactMap { effect -> MouseButton? in
+      guard case .mouseButton(let button, .up) = effect else { return nil }
+      return button
+    }
+    XCTAssertEqual(released, MouseButton.allCases)
+
+    let shutdownRuntime = MouselessRuntime(permissions: .allGranted)
+    enterFreeMode(shutdownRuntime)
+    for (index, binding) in buttonBindings.enumerated() {
+      _ = shutdownRuntime.handle(.keyDown(binding.0, at: Double(index) + 1))
+    }
+    let shutdown = shutdownRuntime.handle(.shutdown)
+    let shutdownReleased = shutdown.effects.compactMap { effect -> MouseButton? in
+      guard case .mouseButton(let button, .up) = effect else { return nil }
+      return button
+    }
+    XCTAssertEqual(shutdownReleased, MouseButton.allCases)
+    XCTAssertEqual(Array(shutdown.effects.prefix(MouseButton.allCases.count)),
+      MouseButton.allCases.map { .mouseButton($0, .up) })
+    for (key, _) in buttonBindings {
+      XCTAssertEqual(shutdownRuntime.handle(.keyUp(key, at: 10_001)).disposition, .passThrough)
+    }
   }
 
   func testDisplayTopologyProjectsIntoNearestScreenAndClampsEdges() {
