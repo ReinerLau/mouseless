@@ -19,7 +19,7 @@ command -v swiftc >/dev/null || {
 
 open "$APP_PATH"
 sleep 1
-read -r -p "Confirm Mouseless is running, Permissions says Ready, and Free mode is Off [y/N]: " ready
+read -r -p "Confirm Mouseless is running and Permissions says Ready [y/N]: " ready
 case "$ready" in
   y | Y | yes | YES) ;;
   *)
@@ -27,5 +27,5 @@ case "$ready" in
     exit 1
     ;;
 esac
-swiftc "$SCRIPT_DIR/motion-smoke-test.swift" -framework CoreGraphics -o "$BUILD_DIR/motion-smoke-test"
+swiftc "$SCRIPT_DIR/motion-smoke-test.swift" -framework AppKit -framework CoreGraphics -o "$BUILD_DIR/motion-smoke-test"
 "$BUILD_DIR/motion-smoke-test"

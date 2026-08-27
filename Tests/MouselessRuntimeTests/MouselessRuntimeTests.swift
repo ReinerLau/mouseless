@@ -108,6 +108,14 @@ final class MouselessRuntimeTests: XCTestCase {
     XCTAssertEqual(point.y - 100, 39.3, accuracy: 0.4)
   }
 
+  func testPhysicalPointerMovementProducesAnIndicatorPositionUpdate() {
+    let runtime = MouselessRuntime(permissions: .allGranted)
+    let response = runtime.handle(.pointerMoved(to: Point(x: 240, y: 180)))
+
+    XCTAssertEqual(response.disposition, .passThrough)
+    XCTAssertEqual(response.effects, [.pointerPositionChanged(to: Point(x: 240, y: 180))])
+  }
+
   func testMovementUsesTheEntireLongFrameInterval() {
     let runtime = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 0, y: 0))
     enterFreeMode(runtime)

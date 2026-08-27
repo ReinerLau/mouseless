@@ -145,6 +145,7 @@ public enum RuntimeEffect: Equatable, Sendable {
   case capabilitiesChanged(PermissionState)
   case modeChanged(isEnabled: Bool)
   case indicator(isVisible: Bool)
+  case pointerPositionChanged(to: Point)
   case pointerMoved(to: Point, buttons: Set<MouseButton>)
   case mouseButton(MouseButton, ButtonPhase)
   case scroll(pixelX: Int, pixelY: Int)
@@ -535,8 +536,12 @@ public final class MouselessRuntime {
         : keyUp(key, timestamp: timestamp)
     case .frame(let deltaTime): return frame(deltaTime: deltaTime)
     case .pointerMoved(let point, let source):
-      if source == .physical { pointer = topology.projected(point) }
-      return RuntimeResponse(disposition: .passThrough)
+      guard source == .physical else {
+        return RuntimeResponse(disposition: .passThrough)
+      }
+      pointer = topology.projected(point)
+      return RuntimeResponse(
+        disposition: .passThrough, effects: [.pointerPositionChanged(to: pointer)])
     case .topologyChanged(let newTopology):
       topology = newTopology
       pointer = topology.projected(pointer)

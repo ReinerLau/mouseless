@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import AppKit
 
 private let optionKey: CGKeyCode = 58
 private let aKey: CGKeyCode = 0
@@ -30,20 +31,67 @@ private func pointerLocation() -> CGPoint {
   return location
 }
 
+private func movePointerToTestOrigin() {
+  let bounds = CGDisplayBounds(CGMainDisplayID())
+  let point = CGPoint(x: bounds.midX, y: bounds.midY)
+  guard
+    let event = CGEvent(
+      mouseEventSource: eventSource, mouseType: .mouseMoved, mouseCursorPosition: point,
+      mouseButton: .left)
+  else { fatalError("Could not create pointer event") }
+  event.post(tap: .cghidEventTap)
+}
+
+private func indicatorCenter() -> CGPoint? {
+  guard
+    let process = NSRunningApplication.runningApplications(
+      withBundleIdentifier: "com.reinerlau.mouseless").first
+  else { return nil }
+  let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]]
+  return windows?.compactMap { window in
+    guard
+      let ownerPID = window[kCGWindowOwnerPID as String] as? Int,
+      ownerPID == Int(process.processIdentifier),
+      let bounds = window[kCGWindowBounds as String] as? [String: CGFloat],
+      let x = bounds["X"], let y = bounds["Y"],
+      let width = bounds["Width"], let height = bounds["Height"],
+      width >= 8, width <= 32, height >= 8, height <= 32
+    else { return nil }
+    return CGPoint(x: x + width / 2, y: y + height / 2)
+  }.first
+}
+
 private func displacement(for keys: [CGKeyCode], duration: TimeInterval = 0.35) -> Double {
-  CGWarpMouseCursorPosition(CGPoint(x: 100, y: 100))
+  movePointerToTestOrigin()
   Thread.sleep(forTimeInterval: 0.1)
   let start = pointerLocation()
   for key in keys { postKey(key, isDown: true) }
   Thread.sleep(forTimeInterval: duration)
   for key in keys.reversed() { postKey(key, isDown: false) }
   Thread.sleep(forTimeInterval: 0.05)
-  return pointerLocation().x - start.x
+  let end = pointerLocation()
+  return end.x - start.x
 }
 
 func run() -> Int32 {
-  print("Starting real-app motion smoke test; free mode must initially be Off.")
+  print("Starting real-app motion smoke test; normalizing free mode state.")
+  if indicatorCenter() != nil { tapOption() }
   tapOption()
+
+  let pointer = pointerLocation()
+  guard let indicator = indicatorCenter() else {
+    fputs("FAIL: could not find the local app's visible indicator window.\n", stderr)
+    tapOption()
+    return 1
+  }
+  let indicatorDistance = hypot(indicator.x - pointer.x, indicator.y - pointer.y)
+  guard indicatorDistance <= 32 else {
+    fputs(
+      String(format: "FAIL: indicator is %.1f pt from the pointer immediately after entering free mode.\n", indicatorDistance),
+      stderr)
+    tapOption()
+    return 1
+  }
 
   let base = displacement(for: [lKey])
   tapOption()

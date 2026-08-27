@@ -218,6 +218,7 @@ private final class IndicatorController {
   }
   private var window: NSPanel?
   private var size = 16.0
+  private var lastPoint: Point?
 
   func show(size: Double) {
     self.size = size * 2
@@ -235,10 +236,13 @@ private final class IndicatorController {
     }
     window?.setContentSize(NSSize(width: size * 2, height: size * 2))
     window?.orderFrontRegardless()
+    if let lastPoint { move(to: lastPoint) }
   }
 
   func hide() { window?.orderOut(nil) }
   func move(to point: Point) {
+    lastPoint = point
+    guard window != nil else { return }
     window?.setFrameOrigin(NSPoint(x: point.x - size / 2, y: point.y - size / 2))
   }
 }
@@ -424,7 +428,7 @@ private final class MouselessApplicationController: NSObject {
     let uiEffects = response.effects.filter { effect in
       switch effect {
       case .capabilitiesChanged, .modeChanged, .indicator, .pointerMoved, .configurationAccepted,
-        .configurationRejected, .eventTapShouldBeReenabled:
+        .pointerPositionChanged, .configurationRejected, .eventTapShouldBeReenabled:
         return true
       default: return false
       }
@@ -456,6 +460,7 @@ private final class MouselessApplicationController: NSObject {
         modeMenuItem?.title = "Free mode: \(isEnabled ? "On" : "Off")"
         logger.info("Free mode changed: enabled=\(isEnabled)")
       case .indicator(let isVisible): isVisible ? indicator.show(size: 8) : indicator.hide()
+      case .pointerPositionChanged(to: let point): indicator.move(to: point)
       case .pointerMoved(to: let point, buttons: _): indicator.move(to: point)
       case .configurationAccepted:
         configurationValid = true
