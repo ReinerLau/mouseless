@@ -425,9 +425,40 @@ final class MouselessRuntimeTests: XCTestCase {
 
     XCTAssertTrue(lostPermission.effects.contains(.mouseButton(.left, .up)))
     XCTAssertTrue(lostPermission.effects.contains(.modeChanged(isEnabled: false)))
+    XCTAssertEqual(runtime.handle(.keyDown(.l, at: 2)).disposition, .passThrough)
 
     let inactive = runtime.handle(.sessionChanged(.inactive))
     XCTAssertTrue(inactive.effects.isEmpty)
+  }
+
+  func testSleepAndWakeKeepFreeModeOffUntilExplicitlyReenabled() {
+    let runtime = MouselessRuntime(permissions: .allGranted)
+    enterFreeMode(runtime)
+    _ = runtime.handle(.keyDown(.space, at: 1))
+
+    let sleeping = runtime.handle(.sessionChanged(.sleeping))
+    XCTAssertTrue(sleeping.effects.contains(.mouseButton(.left, .up)))
+    XCTAssertTrue(sleeping.effects.contains(.modeChanged(isEnabled: false)))
+
+    XCTAssertTrue(runtime.handle(.sessionChanged(.waking)).effects.isEmpty)
+    XCTAssertEqual(runtime.handle(.keyDown(.l, at: 2)).disposition, .passThrough)
+    XCTAssertEqual(runtime.handle(.sessionChanged(.active)).effects, [])
+    XCTAssertEqual(runtime.handle(.keyDown(.l, at: 3)).disposition, .passThrough)
+
+    enterFreeMode(runtime)
+    XCTAssertEqual(runtime.handle(.keyDown(.l, at: 4)).disposition, .consume)
+  }
+
+  func testLockedAndUnlockedSessionKeepsFreeModeOff() {
+    let runtime = MouselessRuntime(permissions: .allGranted)
+    enterFreeMode(runtime)
+    _ = runtime.handle(.keyDown(.space, at: 1))
+
+    let locked = runtime.handle(.sessionChanged(.locked))
+    XCTAssertTrue(locked.effects.contains(.mouseButton(.left, .up)))
+    XCTAssertTrue(locked.effects.contains(.modeChanged(isEnabled: false)))
+    XCTAssertEqual(runtime.handle(.sessionChanged(.active)).effects, [])
+    XCTAssertEqual(runtime.handle(.keyDown(.l, at: 2)).disposition, .passThrough)
   }
 
   func testSafetyEventsReleaseEveryHeldVirtualButton() {
@@ -887,12 +918,33 @@ final class MouselessRuntimeTests: XCTestCase {
     }))
   }
 
-  func testEventTapFailureRequestsRecoveryWithoutChangingMode() {
+  func testEventTapFailureSafelyExitsBeforeRequestingRecovery() {
     let runtime = MouselessRuntime(permissions: .allGranted)
+    enterFreeMode(runtime)
+    _ = runtime.handle(.keyDown(.space, at: 1))
     let response = runtime.handle(.eventTapDisabled)
 
     XCTAssertEqual(response.disposition, .passThrough)
     XCTAssertTrue(response.effects.contains(.eventTapShouldBeReenabled))
+    XCTAssertTrue(response.effects.contains(.diagnostic(.eventTapDisabled)))
+    XCTAssertTrue(response.effects.contains(.mouseButton(.left, .up)))
+    XCTAssertTrue(response.effects.contains(.modeChanged(isEnabled: false)))
+
+    let recovered = runtime.handle(.eventTapReenabled)
+    XCTAssertEqual(recovered.effects, [.diagnostic(.eventTapRecovered)])
+  }
+
+  func testEventTapRecoveryFailureExitsAndReturnsAllKeyboardEvents() {
+    let runtime = MouselessRuntime(permissions: .allGranted)
+    enterFreeMode(runtime)
+    _ = runtime.handle(.keyDown(.space, at: 1))
+
+    let failed = runtime.handle(.eventTapRecoveryFailed)
+    XCTAssertEqual(failed.disposition, .passThrough)
+    XCTAssertTrue(failed.effects.contains(.mouseButton(.left, .up)))
+    XCTAssertTrue(failed.effects.contains(.modeChanged(isEnabled: false)))
+    XCTAssertTrue(failed.effects.contains(.diagnostic(.eventTapRecoveryFailed)))
+    XCTAssertEqual(runtime.handle(.keyDown(.l, at: 2)).disposition, .passThrough)
   }
 
   private func enterFreeMode(_ runtime: MouselessRuntime) {

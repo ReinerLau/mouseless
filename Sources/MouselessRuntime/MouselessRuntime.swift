@@ -175,7 +175,9 @@ public enum EventDisposition: Equatable, Sendable {
 
 public enum Diagnostic: Equatable, Sendable {
   case safetyExit
+  case eventTapDisabled
   case eventTapRecovered
+  case eventTapRecoveryFailed
   case configurationAccepted
   case configurationRejected
 }
@@ -208,6 +210,7 @@ public struct RuntimeResponse: Equatable, Sendable {
 public enum SessionState: Sendable {
   case active
   case inactive
+  case locked
   case sleeping
   case waking
 }
@@ -223,6 +226,8 @@ public struct RuntimeEvent {
     case permissionsChanged(PermissionState)
     case sessionChanged(SessionState)
     case eventTapDisabled
+    case eventTapReenabled
+    case eventTapRecoveryFailed
     case configuration(Data)
     case shutdown
   }
@@ -271,6 +276,10 @@ public struct RuntimeEvent {
   }
 
   public static let eventTapDisabled = RuntimeEvent(kind: .eventTapDisabled)
+
+  public static let eventTapReenabled = RuntimeEvent(kind: .eventTapReenabled)
+
+  public static let eventTapRecoveryFailed = RuntimeEvent(kind: .eventTapRecoveryFailed)
 
   public static func configuration(_ data: Data) -> RuntimeEvent {
     RuntimeEvent(kind: .configuration(data))
@@ -682,9 +691,19 @@ public final class MouselessRuntime {
       }
       return RuntimeResponse(disposition: .passThrough)
     case .eventTapDisabled:
+      var effects = safetyExitEffects()
+      effects.append(.eventTapShouldBeReenabled)
+      effects.append(.diagnostic(.eventTapDisabled))
       return RuntimeResponse(
         disposition: .passThrough,
-        effects: [.eventTapShouldBeReenabled, .diagnostic(.eventTapRecovered)])
+        effects: effects)
+    case .eventTapReenabled:
+      return RuntimeResponse(
+        disposition: .passThrough, effects: [.diagnostic(.eventTapRecovered)])
+    case .eventTapRecoveryFailed:
+      var effects = safetyExitEffects()
+      effects.append(.diagnostic(.eventTapRecoveryFailed))
+      return RuntimeResponse(disposition: .passThrough, effects: effects)
     case .configuration(let data):
       do {
         let decoded = try JSONDecoder().decode(RuntimeConfiguration.self, from: data).validated()

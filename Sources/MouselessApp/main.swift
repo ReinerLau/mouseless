@@ -125,6 +125,7 @@ private final class CoreGraphicsEffectExecutor {
 }
 
 private final class EventTapHost {
+  private let stateLock = NSLock()
   private var thread: Thread?
   private var runLoop: CFRunLoop?
   private var tap: CFMachPort?
@@ -163,8 +164,10 @@ private final class EventTapHost {
         ready.signal()
         return
       }
+      self.stateLock.lock()
       self.tap = tap
       self.runLoop = CFRunLoopGetCurrent()
+      self.stateLock.unlock()
       CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
       CGEvent.tapEnable(tap: tap, enable: true)
       created = true
@@ -181,22 +184,36 @@ private final class EventTapHost {
   }
 
   func stop() {
-    guard !stopped else { return }
+    stateLock.lock()
+    guard !stopped else {
+      stateLock.unlock()
+      return
+    }
     stopped = true
+    let tap = self.tap
+    let runLoop = self.runLoop
+    stateLock.unlock()
     if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
     if let runLoop {
       CFRunLoopStop(runLoop)
       CFRunLoopWakeUp(runLoop)
     }
     finished.wait()
-    tap = nil
-    runLoop = nil
+    stateLock.lock()
+    self.tap = nil
+    self.runLoop = nil
+    stateLock.unlock()
   }
 
-  func reenable() { if let tap { CGEvent.tapEnable(tap: tap, enable: true) } }
+  func reenable() -> Bool {
+    stateLock.lock()
+    defer { stateLock.unlock() }
+    guard let tap, !stopped else { return false }
+    CGEvent.tapEnable(tap: tap, enable: true)
+    return CGEvent.tapIsEnabled(tap: tap)
+  }
 
   fileprivate func receive(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
-    if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { reenable() }
     return callback(type, event)
   }
 }
@@ -258,6 +275,7 @@ private final class MouselessApplicationController: NSObject {
   private let runtime = MouselessRuntime()
   private let runtimeLock = NSLock()
   private var eventTap: EventTapHost?
+  private let eventTapLock = NSLock()
   private var displayLink: CADisplayLink?
   private var statusItem: NSStatusItem?
   private var statusMenuItem: NSMenuItem?
@@ -265,11 +283,35 @@ private final class MouselessApplicationController: NSObject {
   private var reloadMenuItem: NSMenuItem?
   private var configurationValid = true
   private var configurationError: String?
-  private var recoveryCount = 0
+  private var eventTapDisabledCount = 0
+  private var eventTapRecoveryCount = 0
+  private var recoveryFailureCount = 0
   private var lastFrameTime: TimeInterval?
   private var workspaceObservers: [NSObjectProtocol] = []
-  private var permissionCheckTime = 0.0
+  private var distributedObservers: [NSObjectProtocol] = []
+  private var applicationObservers: [NSObjectProtocol] = []
+  private var lastPermissionState: PermissionState?
   private var lastKnownTopology = DisplayTopology.unrestricted
+
+  private func currentEventTap() -> EventTapHost? {
+    eventTapLock.lock()
+    defer { eventTapLock.unlock() }
+    return eventTap
+  }
+
+  private func setEventTap(_ host: EventTapHost?) {
+    eventTapLock.lock()
+    eventTap = host
+    eventTapLock.unlock()
+  }
+
+  private func takeEventTap() -> EventTapHost? {
+    eventTapLock.lock()
+    let host = eventTap
+    eventTap = nil
+    eventTapLock.unlock()
+    return host
+  }
 
   func start() {
     executor.releaseAllButtons(waitUntilPosted: true)
@@ -287,12 +329,16 @@ private final class MouselessApplicationController: NSObject {
   func stop() {
     displayLink?.invalidate()
     displayLink = nil
-    eventTap?.stop()
-    eventTap = nil
+    takeEventTap()?.stop()
     for observer in workspaceObservers {
       NSWorkspace.shared.notificationCenter.removeObserver(observer)
     }
     workspaceObservers.removeAll()
+    let distributedCenter = DistributedNotificationCenter.default()
+    for observer in distributedObservers { distributedCenter.removeObserver(observer) }
+    distributedObservers.removeAll()
+    for observer in applicationObservers { NotificationCenter.default.removeObserver(observer) }
+    applicationObservers.removeAll()
     apply(runtimeResponse(for: .shutdown))
     executor.releaseAllButtons(waitUntilPosted: true)
   }
@@ -331,20 +377,31 @@ private final class MouselessApplicationController: NSObject {
 
   private func checkPermissions(prompt: Bool) {
     let state = permissions.current(prompt: prompt)
+    lastPermissionState = state
+    reconcilePermissions(state)
+  }
+
+  private func pollPermissions() {
+    let state = permissions.current(prompt: false)
+    guard state != lastPermissionState || currentEventTap() == nil else { return }
+    lastPermissionState = state
+    reconcilePermissions(state)
+  }
+
+  private func reconcilePermissions(_ state: PermissionState) {
     var effectiveState = state
     var systemPathIsReady = false
     if state.isReady {
-      if eventTap == nil {
+      if currentEventTap() == nil {
         let host = EventTapHost { [weak self] type, event in
           self?.handleTapEvent(type: type, event: event) ?? Unmanaged.passUnretained(event)
         }
-        if host.start() { eventTap = host }
+        if host.start() { setEventTap(host) }
       }
-      systemPathIsReady = eventTap != nil && executor.postProbe()
+      systemPathIsReady = currentEventTap() != nil && executor.postProbe()
       if !systemPathIsReady { effectiveState.postEvent = false }
     } else {
-      eventTap?.stop()
-      eventTap = nil
+      takeEventTap()?.stop()
     }
     apply(runtimeResponse(for: .permissionsChanged(effectiveState)))
     if systemPathIsReady {
@@ -361,7 +418,22 @@ private final class MouselessApplicationController: NSObject {
       return Unmanaged.passUnretained(event)
     }
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-      apply(runtimeResponse(for: .eventTapDisabled))
+      let response = runtimeResponse(for: .eventTapDisabled)
+      apply(response)
+      guard response.effects.contains(.eventTapShouldBeReenabled) else {
+        return Unmanaged.passUnretained(event)
+      }
+      let host = currentEventTap()
+      let recovered = host?.reenable() ?? false
+      apply(runtimeResponse(for: recovered ? .eventTapReenabled : .eventTapRecoveryFailed))
+      if !recovered {
+        // EventTapHost.stop waits for its run-loop thread, so stop the failed host after this
+        // callback returns instead of blocking the tap callback itself.
+        DispatchQueue.main.async { [weak self, weak host] in
+          host?.stop()
+          if let self, self.currentEventTap() === host { _ = self.takeEventTap() }
+        }
+      }
       return Unmanaged.passUnretained(event)
     }
     let response: RuntimeResponse
@@ -411,12 +483,28 @@ private final class MouselessApplicationController: NSObject {
         if state == .active { self.checkPermissions(prompt: false) }
       }
     }
-    workspaceObservers.append(
+    applicationObservers.append(
       NotificationCenter.default.addObserver(
         forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
       ) { [weak self] _ in
         guard let self else { return }
         self.apply(self.runtimeResponse(for: .topologyChanged(self.currentTopology())))
+      })
+    let distributedCenter = DistributedNotificationCenter.default()
+    distributedObservers.append(
+      distributedCenter.addObserver(
+        forName: Notification.Name("com.apple.screenIsLocked"), object: nil, queue: .main
+      ) { [weak self] _ in
+        guard let self else { return }
+        self.apply(self.runtimeResponse(for: .sessionChanged(.locked)))
+      })
+    distributedObservers.append(
+      distributedCenter.addObserver(
+        forName: Notification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main
+      ) { [weak self] _ in
+        guard let self else { return }
+        self.apply(self.runtimeResponse(for: .sessionChanged(.active)))
+        self.checkPermissions(prompt: false)
       })
   }
 
@@ -443,7 +531,7 @@ private final class MouselessApplicationController: NSObject {
       switch effect {
       case .capabilitiesChanged, .modeChanged, .indicator, .pointerMoved, .configurationAccepted,
         .indicatorSizeChanged, .pointerPositionChanged, .configurationRejected,
-        .eventTapShouldBeReenabled:
+        .eventTapShouldBeReenabled, .diagnostic:
         return true
       default: return false
       }
@@ -487,9 +575,17 @@ private final class MouselessApplicationController: NSObject {
       case .configurationRejected(let reason):
         showConfigurationError(reason)
       case .eventTapShouldBeReenabled:
-        recoveryCount += 1
-        eventTap?.reenable()
-        logger.warning("Event tap re-enabled after disable")
+        logger.warning("Event tap disabled; attempting recovery")
+      case .diagnostic(.eventTapDisabled):
+        eventTapDisabledCount += 1
+      case .diagnostic(.eventTapRecovered):
+        eventTapRecoveryCount += 1
+        logger.notice("Event tap recovered")
+      case .diagnostic(.eventTapRecoveryFailed):
+        recoveryFailureCount += 1
+        updateStatus(
+          state: permissions.current(prompt: false), message: "Event tap recovery failed")
+        logger.error("Event tap recovery failed; free mode remains disabled")
       default: break
       }
     }
@@ -500,11 +596,10 @@ private final class MouselessApplicationController: NSObject {
     let delta = elapsed.isFinite ? max(elapsed, 0) : 0
     lastFrameTime = link.timestamp
     apply(runtimeResponse(for: .frame(deltaTime: delta)))
-    permissionCheckTime += delta
-    if permissionCheckTime >= 0.5 {
-      permissionCheckTime = 0
-      checkPermissions(prompt: false)
-    }
+    // TCC has no reliable change notification. Poll on every display frame so a permission
+    // revocation can end free mode before the next user-visible frame, without touching the tap
+    // callback's latency-sensitive path.
+    pollPermissions()
   }
 
   @objc private func requestPermissions() { checkPermissions(prompt: true) }
@@ -552,7 +647,7 @@ private final class MouselessApplicationController: NSObject {
     let state = permissions.current(prompt: false)
     let configurationErrorDescription = configurationError ?? "none"
     let summary =
-      "Mouseless\npermissions: accessibility=\(state.accessibility), listenEvent=\(state.listenEvent), postEvent=\(state.postEvent)\nconfigurationValid: \(configurationValid)\nconfigurationError: \(configurationErrorDescription)\neventTapRecoveries: \(recoveryCount)"
+      "Mouseless\npermissions: accessibility=\(state.accessibility), listenEvent=\(state.listenEvent), postEvent=\(state.postEvent)\nconfigurationValid: \(configurationValid)\nconfigurationError: \(configurationErrorDescription)\neventTapDisabled: \(eventTapDisabledCount)\neventTapRecoveries: \(eventTapRecoveryCount)\neventTapRecoveryFailures: \(recoveryFailureCount)"
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(summary, forType: .string)
   }

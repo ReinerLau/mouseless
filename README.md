@@ -24,3 +24,7 @@ The first launch creates `~/Library/Application Support/Mouseless/config.json`. 
 documented JSON fields, then choose Reload Configuration from the menu. Invalid files are rejected
 without replacing the last valid runtime configuration. The interactive real-app check is
 `./Scripts/configuration-smoke-test.sh`.
+
+For lock-screen, sleep, permission-loss, and event-tap recovery checks, run
+`./Scripts/recovery-smoke-test.sh`. These cases require system interaction and are recorded as an
+operator checklist; after each fault, free mode must remain off until explicitly re-enabled.
