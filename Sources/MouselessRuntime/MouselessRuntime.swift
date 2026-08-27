@@ -718,10 +718,13 @@ public final class MouselessRuntime {
     }
 
     let scrollTarget = scrollVector() * (configuration.scrolling.baseSpeed * scrollMultiplier())
+    let scrollDisplacement = smoothedDisplacement(
+      current: scrollVelocity, target: scrollTarget, deltaTime: dt,
+      timeConstant: configuration.scrolling.smoothingMilliseconds / 1_000)
     scrollVelocity = smoothed(
       current: scrollVelocity, target: scrollTarget, deltaTime: dt,
       timeConstant: configuration.scrolling.smoothingMilliseconds / 1_000)
-    scrollRemainder = scrollRemainder + scrollVelocity * dt
+    scrollRemainder = scrollRemainder + scrollDisplacement
     let pixelsX = Int(scrollRemainder.x.rounded(.towardZero))
     let pixelsY = Int(scrollRemainder.y.rounded(.towardZero))
     scrollRemainder.x -= Double(pixelsX)
@@ -834,6 +837,15 @@ public final class MouselessRuntime {
   {
     let alpha = timeConstant > 0 ? 1 - exp(-deltaTime / timeConstant) : 1
     return current + (target - current) * alpha
+  }
+
+  private func smoothedDisplacement(
+    current: Point, target: Point, deltaTime: Double, timeConstant: Double
+  ) -> Point {
+    guard deltaTime > 0 else { return Point(x: 0, y: 0) }
+    guard timeConstant > 0 else { return target * deltaTime }
+    let decay = exp(-deltaTime / timeConstant)
+    return target * deltaTime + (current - target) * (timeConstant * (1 - decay))
   }
 }
 

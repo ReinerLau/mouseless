@@ -6,6 +6,19 @@ private let buttonBindings: [(Key, MouseButton)] = [
   (.space, .left), (.r, .right), (.e, .middle), (.q, .back), (.w, .forward),
 ]
 
+private struct ScrollBinding {
+  let key: Key
+  let horizontalSign: Int
+  let verticalSign: Int
+}
+
+private let scrollBindings = [
+  ScrollBinding(key: .m, horizontalSign: 0, verticalSign: 1),
+  ScrollBinding(key: .comma, horizontalSign: 0, verticalSign: -1),
+  ScrollBinding(key: .period, horizontalSign: -1, verticalSign: 0),
+  ScrollBinding(key: .slash, horizontalSign: 1, verticalSign: 0),
+]
+
 final class MouselessRuntimeTests: XCTestCase {
   func testMissingPermissionPassesThroughKeysAndCannotEnterFreeMode() {
     let runtime = MouselessRuntime(permissions: .none)
@@ -598,29 +611,96 @@ final class MouselessRuntimeTests: XCTestCase {
     XCTAssertGreaterThan(try XCTUnwrap(pointer(from: response)).x, -240)
   }
 
-  func testScrollAccumulatesSubpixelDeltasAndSupportsDiagonalInput() {
+  func testScrollBindingsProduceTheSpecifiedFourDirectionsAt960PointsPerSecond() throws {
+    for binding in scrollBindings {
+      let runtime = scrollingRuntime()
+      enterFreeMode(runtime)
+      _ = runtime.handle(.keyDown(binding.key, at: 1))
+
+      let scroll = try XCTUnwrap(scroll(from: runtime.handle(.frame(deltaTime: 1))))
+      XCTAssertEqual(
+        Double(scroll.x), Double(binding.horizontalSign) * 960 * (1 - 0.001), accuracy: 1,
+        "unexpected horizontal scroll for \(binding.key)")
+      XCTAssertEqual(
+        Double(scroll.y), Double(binding.verticalSign) * 960 * (1 - 0.001), accuracy: 1,
+        "unexpected vertical scroll for \(binding.key)")
+    }
+  }
+
+  func testScrollUsesQuarterPrecisionAndStacksThreeFourTimesFastKeys() throws {
+    let keySets: [[Key]] = [[], [.s], [.d], [.f], [.s, .d], [.s, .f], [.d, .f], [.s, .d, .f]]
+
+    for precision in [false, true] {
+      for fastKeys in keySets {
+        let runtime = scrollingRuntime()
+        enterFreeMode(runtime)
+        _ = runtime.handle(.keyDown(.m, at: 1))
+        if precision { _ = runtime.handle(.keyDown(.a, at: 1.1)) }
+        for key in fastKeys { _ = runtime.handle(.keyDown(key, at: 1.2)) }
+
+        let scroll = try XCTUnwrap(scroll(from: runtime.handle(.frame(deltaTime: 1))))
+        let expected = 960.0 * (precision ? 0.25 : 1) * pow(4, Double(fastKeys.count))
+        XCTAssertEqual(Double(scroll.y), expected * (1 - 0.001), accuracy: 1)
+      }
+    }
+  }
+
+  func testScrollOpposingDirectionsCancelAndDiagonalInputIsNormalized() throws {
+    let opposing = scrollingRuntime()
+    enterFreeMode(opposing)
+    _ = opposing.handle(.keyDown(.m, at: 1))
+    _ = opposing.handle(.keyDown(.comma, at: 1.1))
+    XCTAssertNil(scroll(from: opposing.handle(.frame(deltaTime: 1))))
+
+    let diagonal = scrollingRuntime()
+    enterFreeMode(diagonal)
+    _ = diagonal.handle(.keyDown(.m, at: 1))
+    _ = diagonal.handle(.keyDown(.slash, at: 1.1))
+    let result = try XCTUnwrap(scroll(from: diagonal.handle(.frame(deltaTime: 1))))
+    let expected = 960.0 / sqrt(2)
+    XCTAssertEqual(Double(result.x), expected, accuracy: 1)
+    XCTAssertEqual(Double(result.y), expected, accuracy: 1)
+  }
+
+  func testScrollSmoothingUsesTheConfigured47MillisecondTimeConstant() throws {
     let runtime = MouselessRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.m, at: 1))
-    var total = 0
-    for _ in 0..<100 {
-      let response = runtime.handle(.frame(deltaTime: 0.001))
-      for effect in response.effects {
-        if case .scroll(_, let pixelY) = effect { total += pixelY }
-      }
-    }
-    XCTAssertGreaterThan(total, 0)
 
-    _ = runtime.handle(.keyDown(.slash, at: 2))
-    let diagonal = runtime.handle(.frame(deltaTime: 0.02))
-    guard
-      case .scroll(let pixelX, let pixelY) = diagonal.effects.first(where: {
-        if case .scroll = $0 { return true }
-        return false
-      })
-    else { return XCTFail("expected diagonal scroll") }
-    XCTAssertGreaterThan(pixelX, 0)
-    XCTAssertGreaterThan(pixelY, 0)
+    let alpha = 1 - exp(-1.0)
+    let first = try XCTUnwrap(scroll(from: runtime.handle(.frame(deltaTime: 0.047))))
+    let firstDisplacement = 960 * 0.047 * (1 - alpha)
+    XCTAssertEqual(Double(first.y), firstDisplacement, accuracy: 1)
+
+    _ = runtime.handle(.keyDown(.a, at: 1.047))
+    let changed = try XCTUnwrap(scroll(from: runtime.handle(.frame(deltaTime: 0.047))))
+    let firstVelocity = 960 * alpha
+    let changedDisplacement = 240 * 0.047 + (firstVelocity - 240) * 0.047 * alpha
+    XCTAssertEqual(Double(first.y + changed.y), firstDisplacement + changedDisplacement, accuracy: 1)
+    XCTAssertEqual(runtime.handle(.frame(deltaTime: 0)).effects, [])
+  }
+
+  func testScrollRetainsSubpixelRemainderAndDoesNotDependOnRefreshRate() {
+    let fine = scrollingTotal(frameDelta: 0.001, frameCount: 1_000)
+    let sixtyHertz = scrollingTotal(frameDelta: 1.0 / 60.0, frameCount: 60)
+    let oneTwentyHertz = scrollingTotal(frameDelta: 1.0 / 120.0, frameCount: 120)
+
+    XCTAssertGreaterThan(fine, 0)
+    XCTAssertEqual(fine, sixtyHertz, accuracy: 1)
+    XCTAssertEqual(sixtyHertz, oneTwentyHertz, accuracy: 1)
+  }
+
+  func testScrollReleaseDeceleratesToZeroWithoutFurtherEvents() {
+    let runtime = MouselessRuntime(permissions: .allGranted)
+    enterFreeMode(runtime)
+    _ = runtime.handle(.keyDown(.m, at: 1))
+    _ = runtime.handle(.frame(deltaTime: 0.2))
+    _ = runtime.handle(.keyUp(.m, at: 1.2))
+
+    var releasedTotal = 0
+    for _ in 0..<10 { releasedTotal += abs(scroll(from: runtime.handle(.frame(deltaTime: 0.2)))?.y ?? 0) }
+    XCTAssertGreaterThan(releasedTotal, 0)
+    XCTAssertNil(scroll(from: runtime.handle(.frame(deltaTime: 1))))
   }
 
   func testConfigurationIsAtomicAndRejectsUnknownFields() throws {
@@ -671,5 +751,27 @@ final class MouselessRuntimeTests: XCTestCase {
       }
     }
     return lastPoint
+  }
+
+  private func scrollingRuntime() -> MouselessRuntime {
+    MouselessRuntime(
+      configuration: RuntimeConfiguration(
+        scrolling: ScrollSettings(smoothingMilliseconds: 1)), permissions: .allGranted)
+  }
+
+  private func scroll(from response: RuntimeResponse) -> (x: Int, y: Int)? {
+    response.effects.compactMap { effect in
+      guard case .scroll(let pixelX, let pixelY) = effect else { return nil }
+      return (pixelX, pixelY)
+    }.last
+  }
+
+  private func scrollingTotal(frameDelta: TimeInterval, frameCount: Int) -> Int {
+    let runtime = MouselessRuntime(permissions: .allGranted)
+    enterFreeMode(runtime)
+    _ = runtime.handle(.keyDown(.m, at: 1))
+    var total = 0
+    for _ in 0..<frameCount { total += scroll(from: runtime.handle(.frame(deltaTime: frameDelta)))?.y ?? 0 }
+    return total
   }
 }
