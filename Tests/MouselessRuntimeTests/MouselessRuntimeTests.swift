@@ -428,7 +428,7 @@ final class MouselessRuntimeTests: XCTestCase {
     XCTAssertEqual(runtime.handle(.keyDown(.l, at: 2)).disposition, .passThrough)
 
     let inactive = runtime.handle(.sessionChanged(.inactive))
-    XCTAssertTrue(inactive.effects.isEmpty)
+    XCTAssertTrue(inactive.effects.contains(.diagnostic(.safetyExit)))
   }
 
   func testSleepAndWakeKeepFreeModeOffUntilExplicitlyReenabled() {
@@ -916,6 +916,72 @@ final class MouselessRuntimeTests: XCTestCase {
       }
       return false
     }))
+  }
+
+  func testDiagnosticSummaryContainsApprovedFieldsWithoutSensitiveHistory() {
+    var counters = DiagnosticCounters()
+    counters.callbackCount = 12
+    counters.frameCount = 60
+    counters.modeChangeCount = 2
+    counters.safetyExitCount = 1
+    counters.pointerEffectCount = 24
+
+    let summary = DiagnosticSummary(
+      version: "0.1.0", buildIdentity: "Debug", permissions: .allGranted,
+      configuration: .valid, eventTap: .healthy, counters: counters)
+
+    XCTAssertTrue(summary.text.contains("version: 0.1.0"))
+    XCTAssertTrue(summary.text.contains("buildIdentity: Debug"))
+    XCTAssertTrue(summary.text.contains("permissions: accessibility=true"))
+    XCTAssertTrue(summary.text.contains("configuration: valid"))
+    XCTAssertTrue(summary.text.contains("eventTap: healthy"))
+    XCTAssertTrue(summary.text.contains("callbacks: 12"))
+    XCTAssertTrue(summary.text.contains("frames: 60"))
+    XCTAssertTrue(summary.text.contains("pointerEffects: 24"))
+
+    for sensitiveField in [
+      "keyHistory", "inputText", "applicationName", "windowTitle", "pointerHistory", "Chrome",
+      "hello", "leftOption", "space",
+    ] {
+      XCTAssertFalse(summary.text.contains(sensitiveField), "unexpected field: \(sensitiveField)")
+    }
+  }
+
+  func testDiagnosticSummaryDistinguishesConfigurationAndEventTapFailures() {
+    let counters = DiagnosticCounters()
+    let valid = DiagnosticSummary(
+      version: "0.1.0", buildIdentity: "Release", permissions: .allGranted,
+      configuration: .valid, eventTap: .healthy, counters: counters)
+    let failed = DiagnosticSummary(
+      version: "0.1.0", buildIdentity: "Release", permissions: .none,
+      configuration: .invalid, eventTap: .recoveryFailed, counters: counters)
+
+    XCTAssertTrue(valid.text.contains("configuration: valid"))
+    XCTAssertTrue(valid.text.contains("eventTap: healthy"))
+    XCTAssertTrue(failed.text.contains("configuration: invalid"))
+    XCTAssertTrue(failed.text.contains("eventTap: recoveryFailed"))
+    XCTAssertNotEqual(valid.text, failed.text)
+  }
+
+  func testDiagnosticCountersAggregateOnlyPublicEffects() {
+    var counters = DiagnosticCounters()
+    counters.record([
+      .diagnostic(.configurationRejected), .diagnostic(.eventTapDisabled),
+      .diagnostic(.eventTapRecovered), .diagnostic(.eventTapRecoveryFailed),
+      .diagnostic(.safetyExit), .modeChanged(isEnabled: true),
+      .pointerMoved(to: Point(x: 100, y: 200), buttons: []),
+      .mouseButton(.left, .down), .scroll(pixelX: 1, pixelY: -1),
+    ])
+
+    XCTAssertEqual(counters.configurationRejectedCount, 1)
+    XCTAssertEqual(counters.eventTapDisabledCount, 1)
+    XCTAssertEqual(counters.eventTapRecoveryCount, 1)
+    XCTAssertEqual(counters.eventTapRecoveryFailureCount, 1)
+    XCTAssertEqual(counters.safetyExitCount, 1)
+    XCTAssertEqual(counters.modeChangeCount, 1)
+    XCTAssertEqual(counters.pointerEffectCount, 1)
+    XCTAssertEqual(counters.mouseButtonEffectCount, 1)
+    XCTAssertEqual(counters.scrollEffectCount, 1)
   }
 
   func testEventTapFailureSafelyExitsBeforeRequestingRecovery() {

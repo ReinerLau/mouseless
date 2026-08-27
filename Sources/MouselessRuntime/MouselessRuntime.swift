@@ -182,6 +182,154 @@ public enum Diagnostic: Equatable, Sendable {
   case configurationRejected
 }
 
+public enum DiagnosticConfigurationStatus: String, Equatable, Sendable {
+  case valid
+  case invalid
+}
+
+public enum DiagnosticEventTapStatus: String, Equatable, Sendable {
+  case unknown
+  case healthy
+  case unavailable
+  case recovering
+  case recoveryFailed
+}
+
+public struct DiagnosticCounters: Equatable, Sendable {
+  public var callbackCount: Int
+  public var callbackLatencySampleCount: Int
+  public var totalCallbackLatencyMilliseconds: Double
+  public var maximumCallbackLatencyMilliseconds: Double
+  public var frameCount: Int
+  public var modeChangeCount: Int
+  public var safetyExitCount: Int
+  public var eventTapDisabledCount: Int
+  public var eventTapRecoveryCount: Int
+  public var eventTapRecoveryFailureCount: Int
+  public var configurationAcceptedCount: Int
+  public var configurationRejectedCount: Int
+  public var pointerEffectCount: Int
+  public var mouseButtonEffectCount: Int
+  public var scrollEffectCount: Int
+
+  public init(
+    callbackCount: Int = 0, callbackLatencySampleCount: Int = 0,
+    totalCallbackLatencyMilliseconds: Double = 0,
+    maximumCallbackLatencyMilliseconds: Double = 0, frameCount: Int = 0,
+    modeChangeCount: Int = 0, safetyExitCount: Int = 0, eventTapDisabledCount: Int = 0,
+    eventTapRecoveryCount: Int = 0, eventTapRecoveryFailureCount: Int = 0,
+    configurationAcceptedCount: Int = 0, configurationRejectedCount: Int = 0,
+    pointerEffectCount: Int = 0, mouseButtonEffectCount: Int = 0, scrollEffectCount: Int = 0
+  ) {
+    self.callbackCount = callbackCount
+    self.callbackLatencySampleCount = callbackLatencySampleCount
+    self.totalCallbackLatencyMilliseconds = totalCallbackLatencyMilliseconds
+    self.maximumCallbackLatencyMilliseconds = maximumCallbackLatencyMilliseconds
+    self.frameCount = frameCount
+    self.modeChangeCount = modeChangeCount
+    self.safetyExitCount = safetyExitCount
+    self.eventTapDisabledCount = eventTapDisabledCount
+    self.eventTapRecoveryCount = eventTapRecoveryCount
+    self.eventTapRecoveryFailureCount = eventTapRecoveryFailureCount
+    self.configurationAcceptedCount = configurationAcceptedCount
+    self.configurationRejectedCount = configurationRejectedCount
+    self.pointerEffectCount = pointerEffectCount
+    self.mouseButtonEffectCount = mouseButtonEffectCount
+    self.scrollEffectCount = scrollEffectCount
+  }
+
+  public mutating func recordCallback(duration: TimeInterval) -> Int? {
+    callbackCount += 1
+#if DEBUG
+    if duration.isFinite, duration >= 0 {
+      callbackLatencySampleCount += 1
+      let milliseconds = duration * 1_000
+      totalCallbackLatencyMilliseconds += milliseconds
+      maximumCallbackLatencyMilliseconds = max(maximumCallbackLatencyMilliseconds, milliseconds)
+    }
+    return callbackCount.isMultiple(of: 128) ? callbackCount : nil
+#else
+    return nil
+#endif
+  }
+
+  public mutating func recordFrame() {
+    frameCount += 1
+  }
+
+  public mutating func record(_ effects: [RuntimeEffect]) {
+    for effect in effects {
+      switch effect {
+      case .pointerMoved, .pointerPositionChanged: pointerEffectCount += 1
+      case .mouseButton: mouseButtonEffectCount += 1
+      case .scroll: scrollEffectCount += 1
+      case .modeChanged: modeChangeCount += 1
+      case .diagnostic(.safetyExit): safetyExitCount += 1
+      case .diagnostic(.eventTapDisabled): eventTapDisabledCount += 1
+      case .diagnostic(.eventTapRecovered): eventTapRecoveryCount += 1
+      case .diagnostic(.eventTapRecoveryFailed): eventTapRecoveryFailureCount += 1
+      case .diagnostic(.configurationAccepted): configurationAcceptedCount += 1
+      case .diagnostic(.configurationRejected): configurationRejectedCount += 1
+      default: break
+      }
+    }
+  }
+}
+
+public struct DiagnosticSummary: Equatable, Sendable {
+  public let version: String
+  public let buildIdentity: String
+  public let permissions: PermissionState
+  public let configuration: DiagnosticConfigurationStatus
+  public let eventTap: DiagnosticEventTapStatus
+  public let counters: DiagnosticCounters
+
+  public init(
+    version: String, buildIdentity: String, permissions: PermissionState,
+    configuration: DiagnosticConfigurationStatus, eventTap: DiagnosticEventTapStatus,
+    counters: DiagnosticCounters
+  ) {
+    self.version = version
+    self.buildIdentity = buildIdentity
+    self.permissions = permissions
+    self.configuration = configuration
+    self.eventTap = eventTap
+    self.counters = counters
+  }
+
+  public var text: String {
+    let counters = counters
+    return [
+      "Mouseless diagnostics",
+      "version: \(singleLine(version))",
+      "buildIdentity: \(singleLine(buildIdentity))",
+      "permissions: accessibility=\(permissions.accessibility), listenEvent=\(permissions.listenEvent), postEvent=\(permissions.postEvent)",
+      "configuration: \(configuration.rawValue)",
+      "eventTap: \(eventTap.rawValue)",
+      "callbacks: \(counters.callbackCount)",
+      "callbackLatencySamples: \(counters.callbackLatencySampleCount)",
+      "totalCallbackLatencyMilliseconds: \(counters.totalCallbackLatencyMilliseconds)",
+      "maximumCallbackLatencyMilliseconds: \(counters.maximumCallbackLatencyMilliseconds)",
+      "frames: \(counters.frameCount)",
+      "modeChanges: \(counters.modeChangeCount)",
+      "safetyExits: \(counters.safetyExitCount)",
+      "eventTapDisabled: \(counters.eventTapDisabledCount)",
+      "eventTapRecoveries: \(counters.eventTapRecoveryCount)",
+      "eventTapRecoveryFailures: \(counters.eventTapRecoveryFailureCount)",
+      "configurationAccepted: \(counters.configurationAcceptedCount)",
+      "configurationRejected: \(counters.configurationRejectedCount)",
+      "pointerEffects: \(counters.pointerEffectCount)",
+      "mouseButtonEffects: \(counters.mouseButtonEffectCount)",
+      "scrollEffects: \(counters.scrollEffectCount)",
+    ].joined(separator: "\n")
+  }
+}
+
+private func singleLine(_ value: String) -> String {
+  value.replacingOccurrences(of: "\n", with: " ")
+    .replacingOccurrences(of: "\r", with: " ")
+}
+
 public enum RuntimeEffect: Equatable, Sendable {
   case capabilitiesChanged(PermissionState)
   case modeChanged(isEnabled: Bool)
@@ -683,15 +831,22 @@ public final class MouselessRuntime {
     case .permissionsChanged(let newPermissions):
       permissions = newPermissions
       var effects = [RuntimeEffect.capabilitiesChanged(newPermissions)]
-      if !newPermissions.isReady { effects.append(contentsOf: safetyExitEffects()) }
+      if !newPermissions.isReady {
+        effects.append(contentsOf: safetyExitEffects(emitDiagnostic: true))
+      }
       return RuntimeResponse(disposition: .passThrough, effects: effects)
     case .sessionChanged(let state):
-      guard state == .active else {
+      switch state {
+      case .active:
+        return RuntimeResponse(disposition: .passThrough)
+      case .waking:
         return RuntimeResponse(disposition: .passThrough, effects: safetyExitEffects())
+      case .inactive, .locked, .sleeping:
+        return RuntimeResponse(
+          disposition: .passThrough, effects: safetyExitEffects(emitDiagnostic: true))
       }
-      return RuntimeResponse(disposition: .passThrough)
     case .eventTapDisabled:
-      var effects = safetyExitEffects()
+      var effects = safetyExitEffects(emitDiagnostic: true)
       effects.append(.eventTapShouldBeReenabled)
       effects.append(.diagnostic(.eventTapDisabled))
       return RuntimeResponse(
@@ -701,7 +856,7 @@ public final class MouselessRuntime {
       return RuntimeResponse(
         disposition: .passThrough, effects: [.diagnostic(.eventTapRecovered)])
     case .eventTapRecoveryFailed:
-      var effects = safetyExitEffects()
+      var effects = safetyExitEffects(emitDiagnostic: true)
       effects.append(.diagnostic(.eventTapRecoveryFailed))
       return RuntimeResponse(disposition: .passThrough, effects: effects)
     case .configuration(let data):
@@ -744,7 +899,8 @@ public final class MouselessRuntime {
           ])
       }
     case .shutdown:
-      return RuntimeResponse(disposition: .passThrough, effects: safetyExitEffects())
+      return RuntimeResponse(
+        disposition: .passThrough, effects: safetyExitEffects(emitDiagnostic: true))
     }
   }
 
@@ -858,7 +1014,7 @@ public final class MouselessRuntime {
     return RuntimeResponse(disposition: .passThrough, effects: effects)
   }
 
-  private func safetyExitEffects() -> [RuntimeEffect] {
+  private func safetyExitEffects(emitDiagnostic: Bool = false) -> [RuntimeEffect] {
     var effects = heldButtons.sorted { $0.rawValue < $1.rawValue }.map {
       RuntimeEffect.mouseButton($0, .up)
     }
@@ -874,7 +1030,7 @@ public final class MouselessRuntime {
       effects.append(.modeChanged(isEnabled: false))
       effects.append(.indicator(isVisible: false))
     }
-    if !effects.isEmpty { effects.append(.diagnostic(.safetyExit)) }
+    if emitDiagnostic || !effects.isEmpty { effects.append(.diagnostic(.safetyExit)) }
     return effects
   }
 

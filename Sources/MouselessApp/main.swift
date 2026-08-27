@@ -32,6 +32,41 @@ private final class SystemPermissionProvider {
   }
 }
 
+private final class DiagnosticCollector {
+  private let lock = NSLock()
+  private var counters = DiagnosticCounters()
+
+  func recordCallback(duration: TimeInterval) -> Int? {
+    lock.lock()
+    defer { lock.unlock() }
+    return counters.recordCallback(duration: duration)
+  }
+
+  func recordFrame() {
+    lock.lock()
+    counters.recordFrame()
+    lock.unlock()
+  }
+
+  func record(_ response: RuntimeResponse) {
+    lock.lock()
+    counters.record(response.effects)
+    lock.unlock()
+  }
+
+  func recordConfigurationReadFailure() {
+    lock.lock()
+    counters.configurationRejectedCount += 1
+    lock.unlock()
+  }
+
+  func snapshot() -> DiagnosticCounters {
+    lock.lock()
+    defer { lock.unlock() }
+    return counters
+  }
+}
+
 private final class CoreGraphicsEffectExecutor {
   private let queue = DispatchQueue(label: "com.reinerlau.mouseless.effects")
 
@@ -272,6 +307,7 @@ private final class MouselessApplicationController: NSObject {
   private let permissions = SystemPermissionProvider()
   private let executor = CoreGraphicsEffectExecutor()
   private let indicator = IndicatorController()
+  private let diagnostics = DiagnosticCollector()
   private let runtime = MouselessRuntime()
   private let runtimeLock = NSLock()
   private var eventTap: EventTapHost?
@@ -283,9 +319,7 @@ private final class MouselessApplicationController: NSObject {
   private var reloadMenuItem: NSMenuItem?
   private var configurationValid = true
   private var configurationError: String?
-  private var eventTapDisabledCount = 0
-  private var eventTapRecoveryCount = 0
-  private var recoveryFailureCount = 0
+  private var eventTapStatus: DiagnosticEventTapStatus = .unknown
   private var lastFrameTime: TimeInterval?
   private var workspaceObservers: [NSObjectProtocol] = []
   private var distributedObservers: [NSObjectProtocol] = []
@@ -314,6 +348,7 @@ private final class MouselessApplicationController: NSObject {
   }
 
   func start() {
+    logger.notice("Application started")
     executor.releaseAllButtons(waitUntilPosted: true)
     configureMenu()
     reloadConfiguration(createIfMissing: true)
@@ -327,6 +362,7 @@ private final class MouselessApplicationController: NSObject {
   }
 
   func stop() {
+    logger.notice("Application stopping")
     displayLink?.invalidate()
     displayLink = nil
     takeEventTap()?.stop()
@@ -378,7 +414,7 @@ private final class MouselessApplicationController: NSObject {
   private func checkPermissions(prompt: Bool) {
     let state = permissions.current(prompt: prompt)
     lastPermissionState = state
-    reconcilePermissions(state)
+    reconcilePermissions(state, clearEventTapFailure: true)
   }
 
   private func pollPermissions() {
@@ -388,7 +424,7 @@ private final class MouselessApplicationController: NSObject {
     reconcilePermissions(state)
   }
 
-  private func reconcilePermissions(_ state: PermissionState) {
+  private func reconcilePermissions(_ state: PermissionState, clearEventTapFailure: Bool = false) {
     var effectiveState = state
     var systemPathIsReady = false
     if state.isReady {
@@ -403,9 +439,18 @@ private final class MouselessApplicationController: NSObject {
     } else {
       takeEventTap()?.stop()
     }
+    if state.isReady && systemPathIsReady {
+      if clearEventTapFailure || eventTapStatus != .recoveryFailed {
+        eventTapStatus = .healthy
+      }
+    } else if !state.isReady || eventTapStatus != .recoveryFailed {
+      eventTapStatus = .unavailable
+    }
     apply(runtimeResponse(for: .permissionsChanged(effectiveState)))
     if systemPathIsReady {
-      updateStatus(state: state, message: "Ready")
+      updateStatus(
+        state: state,
+        message: eventTapStatus == .recoveryFailed ? "Event tap recovery failed" : "Ready")
     } else if state.isReady {
       updateStatus(state: state, message: "Permissions granted; event tap unavailable")
     } else {
@@ -414,6 +459,12 @@ private final class MouselessApplicationController: NSObject {
   }
 
   private func handleTapEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+    let callbackStarted = CACurrentMediaTime()
+    defer {
+      if let batchCount = diagnostics.recordCallback(duration: CACurrentMediaTime() - callbackStarted) {
+        logger.debug("Event tap callback metrics: callbacks=\(batchCount)")
+      }
+    }
     if event.getIntegerValueField(.eventSourceUserData) == synthesizedEventMarker {
       return Unmanaged.passUnretained(event)
     }
@@ -479,6 +530,7 @@ private final class MouselessApplicationController: NSObject {
     workspaceObservers = names.map { name, state in
       center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
         guard let self else { return }
+        logger.notice("Session changed: \(self.sessionLabel(state))")
         self.apply(self.runtimeResponse(for: .sessionChanged(state)))
         if state == .active { self.checkPermissions(prompt: false) }
       }
@@ -527,6 +579,7 @@ private final class MouselessApplicationController: NSObject {
   }
 
   private func apply(_ response: RuntimeResponse) {
+    diagnostics.record(response)
     let uiEffects = response.effects.filter { effect in
       switch effect {
       case .capabilitiesChanged, .modeChanged, .indicator, .pointerMoved, .configurationAccepted,
@@ -575,23 +628,29 @@ private final class MouselessApplicationController: NSObject {
       case .configurationRejected(let reason):
         showConfigurationError(reason)
       case .eventTapShouldBeReenabled:
+        eventTapStatus = .recovering
         logger.warning("Event tap disabled; attempting recovery")
       case .diagnostic(.eventTapDisabled):
-        eventTapDisabledCount += 1
+        eventTapStatus = .recovering
       case .diagnostic(.eventTapRecovered):
-        eventTapRecoveryCount += 1
+        eventTapStatus = .healthy
         logger.notice("Event tap recovered")
       case .diagnostic(.eventTapRecoveryFailed):
-        recoveryFailureCount += 1
+        eventTapStatus = .recoveryFailed
         updateStatus(
           state: permissions.current(prompt: false), message: "Event tap recovery failed")
         logger.error("Event tap recovery failed; free mode remains disabled")
+      case .diagnostic(.safetyExit):
+        logger.notice("Safety cleanup completed")
+      case .diagnostic(.configurationRejected):
+        logger.warning("Configuration rejected")
       default: break
       }
     }
   }
 
   @objc private func frame(_ link: CADisplayLink) {
+    diagnostics.recordFrame()
     let elapsed = link.timestamp - (lastFrameTime ?? link.timestamp)
     let delta = elapsed.isFinite ? max(elapsed, 0) : 0
     lastFrameTime = link.timestamp
@@ -616,6 +675,7 @@ private final class MouselessApplicationController: NSObject {
       }
       apply(runtimeResponse(for: .configuration(try Data(contentsOf: url))))
     } catch {
+      diagnostics.recordConfigurationReadFailure()
       showConfigurationError("could not read configuration: \(error.localizedDescription)")
     }
   }
@@ -645,11 +705,19 @@ private final class MouselessApplicationController: NSObject {
 
   @objc private func copyDiagnostics() {
     let state = permissions.current(prompt: false)
-    let configurationErrorDescription = configurationError ?? "none"
-    let summary =
-      "Mouseless\npermissions: accessibility=\(state.accessibility), listenEvent=\(state.listenEvent), postEvent=\(state.postEvent)\nconfigurationValid: \(configurationValid)\nconfigurationError: \(configurationErrorDescription)\neventTapDisabled: \(eventTapDisabledCount)\neventTapRecoveries: \(eventTapRecoveryCount)\neventTapRecoveryFailures: \(recoveryFailureCount)"
+    let counters = diagnostics.snapshot()
+    let summary = DiagnosticSummary(
+      version: applicationVersion(), buildIdentity: buildIdentity(), permissions: state,
+      configuration: configurationValid ? .valid : .invalid, eventTap: eventTapStatus,
+      counters: counters).text
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(summary, forType: .string)
+#if DEBUG
+    logger.debug(
+      "Diagnostic metrics: callbacks=\(counters.callbackCount), frames=\(counters.frameCount), pointerEffects=\(counters.pointerEffectCount), mouseButtonEffects=\(counters.mouseButtonEffectCount), scrollEffects=\(counters.scrollEffectCount), safetyExits=\(counters.safetyExitCount)"
+    )
+#endif
+    logger.info("Diagnostic summary copied")
   }
 
   @objc private func quit() { NSApp.terminate(nil) }
@@ -665,6 +733,30 @@ private final class MouselessApplicationController: NSObject {
     if !state.listenEvent { missing.append("Listen Event") }
     if !state.postEvent { missing.append("Post Event") }
     return missing.joined(separator: ", ")
+  }
+
+  private func applicationVersion() -> String {
+    Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+  }
+
+  private func buildIdentity() -> String {
+#if DEBUG
+    let configuration = "Debug"
+#else
+    let configuration = "Release"
+#endif
+    let number = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+    return "\(configuration) \(number)"
+  }
+
+  private func sessionLabel(_ state: SessionState) -> String {
+    switch state {
+    case .active: return "active"
+    case .inactive: return "inactive"
+    case .locked: return "locked"
+    case .sleeping: return "sleeping"
+    case .waking: return "waking"
+    }
   }
 
   private func key(for code: CGKeyCode) -> Key {

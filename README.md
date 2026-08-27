@@ -20,6 +20,11 @@ swift test
 
 On first launch, use Request Permissions and grant Accessibility, Input Monitoring (Listen Event), and Post Event access. The menu offers Recheck Permissions, Open System Settings, Reload Configuration, diagnostics, and Quit.
 
+Copy Diagnostic Summary copies only version/build identity, capability state, configuration and event-tap
+status, plus aggregate callback, frame, recovery and effect counters. It does not include input,
+application, window or pointer history. In Debug builds, callback latency is also aggregated without
+recording individual events.
+
 The first launch creates `~/Library/Application Support/Mouseless/config.json`. Edit only the
 documented JSON fields, then choose Reload Configuration from the menu. Invalid files are rejected
 without replacing the last valid runtime configuration. The interactive real-app check is

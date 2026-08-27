@@ -5,6 +5,7 @@ APP_PATH="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../build/Build/Products/Rele
 
 [[ -d "$APP_PATH" ]] || { echo "App bundle not found: $APP_PATH" >&2; exit 1; }
 
+previous_clipboard=$(pbpaste)
 open "$APP_PATH"
 cat <<'EOF'
 Mouseless recovery smoke test
@@ -35,4 +36,28 @@ Expected menu/diagnostic results:
 EOF
 
 read -r -p "Press Enter after completing the checklist, or Ctrl-C to abort: " _
+diagnostics=$(pbpaste)
+[[ -n "$diagnostics" ]] || { echo "Diagnostic summary is empty; copy it from the menu first." >&2; exit 1; }
+[[ "$diagnostics" != "$previous_clipboard" ]] || {
+  echo "Diagnostic summary was not freshly copied; use Copy Diagnostic Summary now." >&2
+  exit 1
+}
+for required in \
+  "version:" "buildIdentity:" "permissions:" "configuration:" "eventTap:" \
+  "callbacks:" "callbackLatencySamples:" "totalCallbackLatencyMilliseconds:" \
+  "maximumCallbackLatencyMilliseconds:" "frames:" "modeChanges:" "safetyExits:" \
+  "eventTapDisabled:" "eventTapRecoveries:" "eventTapRecoveryFailures:" \
+  "configurationAccepted:" "configurationRejected:" "pointerEffects:" \
+  "mouseButtonEffects:" "scrollEffects:"; do
+  [[ "$diagnostics" == *"$required"* ]] || {
+    echo "Diagnostic summary is missing: $required" >&2
+    exit 1
+  }
+done
+for forbidden in "keyHistory" "inputText" "applicationName" "windowTitle" "pointerHistory"; do
+  [[ "$diagnostics" != *"$forbidden"* ]] || {
+    echo "Diagnostic summary contains a forbidden field: $forbidden" >&2
+    exit 1
+  }
+done
 echo "Recovery smoke checklist completed by operator."
