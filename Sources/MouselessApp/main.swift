@@ -326,6 +326,7 @@ private final class MouselessApplicationController: NSObject {
   private var applicationObservers: [NSObjectProtocol] = []
   private var lastPermissionState: PermissionState?
   private var lastKnownTopology = DisplayTopology.unrestricted
+  private var keyboardModifiers: KeyboardModifiers = []
 
   private func currentEventTap() -> EventTapHost? {
     eventTapLock.lock()
@@ -465,6 +466,7 @@ private final class MouselessApplicationController: NSObject {
       return Unmanaged.passUnretained(event)
     }
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+      keyboardModifiers = []
       let response = runtimeResponse(for: .eventTapDisabled)
       enqueue(response)
       guard response.effects.contains(.eventTapShouldBeReenabled) else {
@@ -488,18 +490,25 @@ private final class MouselessApplicationController: NSObject {
     case .keyDown, .keyUp:
       let key = key(for: CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode)))
       let timestamp = Double(event.timestamp) / 1_000_000_000
-      response = runtimeResponse(
-        for: type == .keyDown
-          ? .keyDown(
-            key, at: timestamp,
-            isAutoRepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0)
-          : .keyUp(key, at: timestamp))
+      response = runtimeResponse(for: .keyboard(
+        KeyboardEvent(
+          key: key,
+          phase: type == .keyDown ? .down : .up,
+          timestamp: timestamp,
+          isAutoRepeat: type == .keyDown
+            && event.getIntegerValueField(.keyboardEventAutorepeat) != 0,
+          modifiers: modifierState(for: event))))
     case .flagsChanged:
       let key = key(for: CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode)))
       let timestamp = Double(event.timestamp) / 1_000_000_000
-      response = runtimeResponse(
-        for: .modifierChanged(
-          key, isPressed: event.flags.contains(.maskAlternate), at: timestamp))
+      let modifiers = modifierState(for: event, key: key)
+      response = runtimeResponse(for: .keyboard(
+        KeyboardEvent(
+          key: key,
+          phase: modifierPhase(for: key, modifiers: modifiers),
+          timestamp: timestamp,
+          isAutoRepeat: false,
+          modifiers: modifiers)))
     case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
       response = runtimeResponse(
         for: .pointerMoved(to: Point(x: event.location.x, y: event.location.y)))
@@ -761,8 +770,16 @@ private final class MouselessApplicationController: NSObject {
 
   private func key(for code: CGKeyCode) -> Key {
     switch code {
+    case CGKeyCode(kVK_Command): return .leftCommand
+    case CGKeyCode(kVK_RightCommand): return .rightCommand
+    case CGKeyCode(kVK_Control): return .leftControl
+    case CGKeyCode(kVK_RightControl): return .rightControl
     case CGKeyCode(kVK_Option): return .leftOption
     case CGKeyCode(kVK_RightOption): return .rightOption
+    case CGKeyCode(kVK_Shift): return .leftShift
+    case CGKeyCode(kVK_RightShift): return .rightShift
+    case CGKeyCode(kVK_CapsLock): return .capsLock
+    case CGKeyCode(kVK_Function): return .function
     case CGKeyCode(kVK_Escape): return .escape
     case CGKeyCode(kVK_ANSI_I): return .i
     case CGKeyCode(kVK_ANSI_J): return .j
@@ -783,6 +800,43 @@ private final class MouselessApplicationController: NSObject {
     case CGKeyCode(kVK_ANSI_F): return .f
     default: return .other(Int(code))
     }
+  }
+
+  private func modifierState(for event: CGEvent, key: Key? = nil) -> KeyboardModifiers {
+    var state = keyboardModifiers
+    if let key, let modifier = KeyboardModifiers.modifier(for: key) {
+      switch key {
+      case .capsLock:
+        if event.flags.contains(.maskAlphaShift) {
+          state.insert(modifier)
+        } else {
+          state.remove(modifier)
+        }
+      case .function:
+        if event.flags.contains(.maskSecondaryFn) {
+          state.insert(modifier)
+        } else {
+          state.remove(modifier)
+        }
+      default:
+        if state.contains(modifier) {
+          state.remove(modifier)
+        } else {
+          state.insert(modifier)
+        }
+      }
+    }
+    if !event.flags.contains(.maskCommand) { state.subtract(.command) }
+    if !event.flags.contains(.maskControl) { state.subtract(.control) }
+    if !event.flags.contains(.maskAlternate) { state.subtract(.option) }
+    if !event.flags.contains(.maskShift) { state.subtract(.shift) }
+    keyboardModifiers = state
+    return state
+  }
+
+  private func modifierPhase(for key: Key, modifiers: KeyboardModifiers) -> KeyboardEventPhase {
+    guard let modifier = KeyboardModifiers.modifier(for: key) else { return .down }
+    return modifiers.contains(modifier) ? .down : .up
   }
 }
 

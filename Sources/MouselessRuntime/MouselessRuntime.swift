@@ -117,7 +117,9 @@ public struct PermissionState: Equatable, Sendable {
 }
 
 public enum Key: Hashable, Sendable {
-  case leftOption, rightOption, escape
+  case leftCommand, rightCommand, leftControl, rightControl
+  case leftOption, rightOption, leftShift, rightShift, capsLock, function
+  case escape
   case i, j, k, l
   case space, r, e, q, w
   case m, comma, period, slash
@@ -166,6 +168,74 @@ public enum MouseButton: Int, CaseIterable, Hashable, Sendable {
 
 public enum ButtonPhase: Sendable {
   case down, up
+}
+
+public enum KeyboardEventPhase: Equatable, Sendable {
+  case down, up
+}
+
+public struct KeyboardModifiers: OptionSet, Equatable, Sendable {
+  public let rawValue: UInt16
+
+  public init(rawValue: UInt16) {
+    self.rawValue = rawValue
+  }
+
+  public static let leftCommand = KeyboardModifiers(rawValue: 1 << 0)
+  public static let rightCommand = KeyboardModifiers(rawValue: 1 << 1)
+  public static let leftControl = KeyboardModifiers(rawValue: 1 << 2)
+  public static let rightControl = KeyboardModifiers(rawValue: 1 << 3)
+  public static let leftOption = KeyboardModifiers(rawValue: 1 << 4)
+  public static let rightOption = KeyboardModifiers(rawValue: 1 << 5)
+  public static let leftShift = KeyboardModifiers(rawValue: 1 << 6)
+  public static let rightShift = KeyboardModifiers(rawValue: 1 << 7)
+  public static let capsLock = KeyboardModifiers(rawValue: 1 << 8)
+  public static let function = KeyboardModifiers(rawValue: 1 << 9)
+
+  public static let command: KeyboardModifiers = [.leftCommand, .rightCommand]
+  public static let control: KeyboardModifiers = [.leftControl, .rightControl]
+  public static let option: KeyboardModifiers = [.leftOption, .rightOption]
+  public static let shift: KeyboardModifiers = [.leftShift, .rightShift]
+
+  public var containsCommandOrControl: Bool {
+    contains(.leftCommand) || contains(.rightCommand)
+      || contains(.leftControl) || contains(.rightControl)
+  }
+
+  public static func modifier(for key: Key) -> KeyboardModifiers? {
+    switch key {
+    case .leftCommand: return .leftCommand
+    case .rightCommand: return .rightCommand
+    case .leftControl: return .leftControl
+    case .rightControl: return .rightControl
+    case .leftOption: return .leftOption
+    case .rightOption: return .rightOption
+    case .leftShift: return .leftShift
+    case .rightShift: return .rightShift
+    case .capsLock: return .capsLock
+    case .function: return .function
+    default: return nil
+    }
+  }
+}
+
+public struct KeyboardEvent: Equatable, Sendable {
+  public let key: Key
+  public let phase: KeyboardEventPhase
+  public let timestamp: TimeInterval
+  public let isAutoRepeat: Bool
+  public let modifiers: KeyboardModifiers
+
+  public init(
+    key: Key, phase: KeyboardEventPhase, timestamp: TimeInterval, isAutoRepeat: Bool,
+    modifiers: KeyboardModifiers
+  ) {
+    self.key = key
+    self.phase = phase
+    self.timestamp = timestamp
+    self.isAutoRepeat = isAutoRepeat
+    self.modifiers = modifiers
+  }
 }
 
 public enum EventDisposition: Equatable, Sendable {
@@ -365,8 +435,7 @@ public enum SessionState: Sendable {
 
 public struct RuntimeEvent {
   fileprivate enum Kind {
-    case keyDown(Key, timestamp: TimeInterval, isAutoRepeat: Bool)
-    case keyUp(Key, timestamp: TimeInterval)
+    case keyboard(KeyboardEvent)
     case modifierChanged(Key, isPressed: Bool, timestamp: TimeInterval)
     case frame(deltaTime: TimeInterval)
     case pointerMoved(Point, source: PointerSource)
@@ -383,14 +452,26 @@ public struct RuntimeEvent {
   fileprivate enum PointerSource { case physical, synthesized }
   fileprivate let kind: Kind
 
-  public static func keyDown(_ key: Key, at timestamp: TimeInterval, isAutoRepeat: Bool = false)
-    -> RuntimeEvent
-  {
-    RuntimeEvent(kind: .keyDown(key, timestamp: timestamp, isAutoRepeat: isAutoRepeat))
+  public static func keyboard(_ event: KeyboardEvent) -> RuntimeEvent {
+    RuntimeEvent(kind: .keyboard(event))
   }
 
-  public static func keyUp(_ key: Key, at timestamp: TimeInterval) -> RuntimeEvent {
-    RuntimeEvent(kind: .keyUp(key, timestamp: timestamp))
+  public static func keyDown(
+    _ key: Key, at timestamp: TimeInterval, isAutoRepeat: Bool = false,
+    modifiers: KeyboardModifiers = []
+  ) -> RuntimeEvent {
+    keyboard(
+      KeyboardEvent(
+        key: key, phase: .down, timestamp: timestamp, isAutoRepeat: isAutoRepeat,
+        modifiers: modifiers))
+  }
+
+  public static func keyUp(
+    _ key: Key, at timestamp: TimeInterval, modifiers: KeyboardModifiers = []
+  ) -> RuntimeEvent {
+    keyboard(
+      KeyboardEvent(
+        key: key, phase: .up, timestamp: timestamp, isAutoRepeat: false, modifiers: modifiers))
   }
 
   public static func modifierChanged(_ key: Key, isPressed: Bool, at timestamp: TimeInterval)
@@ -781,6 +862,8 @@ public final class MouselessRuntime {
   private var pointer = Point(x: 0, y: 0)
   private var movementPoint = Point(x: 0, y: 0)
   private var pressedKeys: Set<Key> = []
+  private var keyboardDispositions: [Key: EventDisposition] = [:]
+  private var activeModifiers: KeyboardModifiers = []
   private var heldButtons: Set<MouseButton> = []
   private var optionDownAt: TimeInterval?
   private var optionHadCombination = false
@@ -802,13 +885,20 @@ public final class MouselessRuntime {
 
   public func handle(_ event: RuntimeEvent) -> RuntimeResponse {
     switch event.kind {
-    case .keyDown(let key, let timestamp, let isAutoRepeat):
-      return keyDown(key, timestamp: timestamp, isAutoRepeat: isAutoRepeat)
-    case .keyUp(let key, let timestamp): return keyUp(key, timestamp: timestamp)
+    case .keyboard(let keyboardEvent): return keyboard(keyboardEvent)
     case .modifierChanged(let key, let isPressed, let timestamp):
-      return isPressed
-        ? keyDown(key, timestamp: timestamp, isAutoRepeat: false)
-        : keyUp(key, timestamp: timestamp)
+      var modifiers = activeModifiers
+      if let modifier = KeyboardModifiers.modifier(for: key) {
+        if isPressed {
+          modifiers.insert(modifier)
+        } else {
+          modifiers.remove(modifier)
+        }
+      }
+      return keyboard(
+        KeyboardEvent(
+          key: key, phase: isPressed ? .down : .up, timestamp: timestamp,
+          isAutoRepeat: false, modifiers: modifiers))
     case .frame(let deltaTime): return frame(deltaTime: deltaTime)
     case .pointerMoved(let point, let source):
       guard source == .physical else {
@@ -868,6 +958,8 @@ public final class MouselessRuntime {
         configuration = decoded
         heldButtons.removeAll()
         pressedKeys.removeAll()
+        keyboardDispositions.removeAll()
+        activeModifiers = []
         optionDownAt = nil
         optionHadCombination = false
         movementVelocity = Point(x: 0, y: 0)
@@ -904,16 +996,40 @@ public final class MouselessRuntime {
     }
   }
 
-  private func keyDown(_ key: Key, timestamp: TimeInterval, isAutoRepeat: Bool) -> RuntimeResponse {
+  private func keyboard(_ event: KeyboardEvent) -> RuntimeResponse {
+    activeModifiers = event.modifiers
+    switch event.phase {
+    case .down:
+      return keyDown(
+        event.key, timestamp: event.timestamp, isAutoRepeat: event.isAutoRepeat,
+        modifiers: event.modifiers)
+    case .up:
+      return keyUp(event.key, timestamp: event.timestamp)
+    }
+  }
+
+  private func keyDown(
+    _ key: Key, timestamp: TimeInterval, isAutoRepeat: Bool, modifiers: KeyboardModifiers
+  ) -> RuntimeResponse {
     if key == configurationKey(named: configuration.bindings.toggle) {
       if !isAutoRepeat {
         optionDownAt = timestamp
-        optionHadCombination = false
+        let activationModifier = KeyboardModifiers.modifier(for: key) ?? []
+        optionHadCombination = !modifiers.subtracting(activationModifier).isEmpty
+        keyboardDispositions[key] = .passThrough
       }
       return RuntimeResponse(disposition: .passThrough)
     }
     if optionDownAt != nil { optionHadCombination = true }
+    if isAutoRepeat, let disposition = keyboardDispositions[key] {
+      return RuntimeResponse(disposition: disposition)
+    }
     guard modeEnabled, permissions.isReady else {
+      if !isAutoRepeat { keyboardDispositions[key] = .passThrough }
+      return RuntimeResponse(disposition: .passThrough)
+    }
+    if modifiers.containsCommandOrControl {
+      if !isAutoRepeat { keyboardDispositions[key] = .passThrough }
       return RuntimeResponse(disposition: .passThrough)
     }
     if !isAutoRepeat {
@@ -931,15 +1047,22 @@ public final class MouselessRuntime {
       }
     }
     if key == configurationKey(named: configuration.bindings.escape) {
+      keyboardDispositions[key] = .consume
       return RuntimeResponse(disposition: .consume, effects: safetyExitEffects())
     }
     guard let button = button(for: key) else {
-      if isMappedKey(key), !isAutoRepeat { pressedKeys.insert(key) }
-      return RuntimeResponse(disposition: isMappedKey(key) ? .consume : .passThrough)
+      let disposition: EventDisposition = isMappedKey(key) ? .consume : .passThrough
+      if !isAutoRepeat {
+        keyboardDispositions[key] = disposition
+        if disposition == .consume { pressedKeys.insert(key) }
+      }
+      return RuntimeResponse(disposition: disposition)
     }
     if !isAutoRepeat, heldButtons.insert(button).inserted {
+      keyboardDispositions[key] = .consume
       return RuntimeResponse(disposition: .consume, effects: [.mouseButton(button, .down)])
     }
+    if !isAutoRepeat { keyboardDispositions[key] = .consume }
     return RuntimeResponse(disposition: .consume)
   }
 
@@ -948,13 +1071,14 @@ public final class MouselessRuntime {
       defer {
         optionDownAt = nil
         optionHadCombination = false
+        keyboardDispositions.removeValue(forKey: key)
       }
       guard permissions.isReady, let started = optionDownAt,
         timestamp - started <= configuration.optionTapMilliseconds / 1_000,
         !optionHadCombination
       else { return RuntimeResponse(disposition: .passThrough) }
       if modeEnabled {
-        return RuntimeResponse(disposition: .passThrough, effects: safetyExitEffects())
+        return RuntimeResponse(disposition: .passThrough, effects: exitFreeModeEffects())
       }
       modeEnabled = true
       movementVelocity = Point(x: 0, y: 0)
@@ -967,7 +1091,10 @@ public final class MouselessRuntime {
           .indicator(isVisible: configuration.indicator.enabled),
         ])
     }
-    guard modeEnabled, permissions.isReady else {
+    guard permissions.isReady else {
+      return RuntimeResponse(disposition: .passThrough)
+    }
+    guard keyboardDispositions.removeValue(forKey: key) == .consume else {
       return RuntimeResponse(disposition: .passThrough)
     }
     if let button = button(for: key), heldButtons.remove(button) != nil {
@@ -975,7 +1102,22 @@ public final class MouselessRuntime {
       return RuntimeResponse(disposition: .consume, effects: [.mouseButton(button, .up)])
     }
     pressedKeys.remove(key)
-    return RuntimeResponse(disposition: isMappedKey(key) ? .consume : .passThrough)
+    return RuntimeResponse(disposition: .consume)
+  }
+
+  private func exitFreeModeEffects() -> [RuntimeEffect] {
+    var effects = heldButtons.sorted { $0.rawValue < $1.rawValue }.map {
+      RuntimeEffect.mouseButton($0, .up)
+    }
+    heldButtons.removeAll()
+    pressedKeys.removeAll()
+    movementVelocity = Point(x: 0, y: 0)
+    scrollVelocity = Point(x: 0, y: 0)
+    scrollRemainder = Point(x: 0, y: 0)
+    modeEnabled = false
+    effects.append(.modeChanged(isEnabled: false))
+    effects.append(.indicator(isVisible: false))
+    return effects
   }
 
   private func frame(deltaTime: TimeInterval) -> RuntimeResponse {
@@ -1020,6 +1162,8 @@ public final class MouselessRuntime {
     }
     heldButtons.removeAll()
     pressedKeys.removeAll()
+    keyboardDispositions.removeAll()
+    activeModifiers = []
     optionDownAt = nil
     optionHadCombination = false
     movementVelocity = Point(x: 0, y: 0)

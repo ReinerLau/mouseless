@@ -20,6 +20,129 @@ private let scrollBindings = [
 ]
 
 final class MouselessRuntimeTests: XCTestCase {
+  func testKeyboardEventPublicInterfaceCarriesPhysicalKeyLifecycleAndModifiers() {
+    let event = KeyboardEvent(
+      key: .i, phase: .down, timestamp: 12.5, isAutoRepeat: true,
+      modifiers: [.leftCommand, .rightShift])
+
+    XCTAssertEqual(event.key, .i)
+    XCTAssertEqual(event.phase, .down)
+    XCTAssertEqual(event.timestamp, 12.5)
+    XCTAssertTrue(event.isAutoRepeat)
+    XCTAssertEqual(event.modifiers, [.leftCommand, .rightShift])
+  }
+
+  func testCommandAndControlShortcutsPassThroughMappedKeysForEntireLifecycle() {
+    let shortcutModifiers: [KeyboardModifiers] = [
+      .leftCommand, .rightCommand, .leftControl, .rightControl,
+      [.leftCommand, .rightShift], [.rightControl, .rightOption],
+    ]
+
+    for modifiers in shortcutModifiers {
+      let runtime = MouselessRuntime(permissions: .allGranted)
+      enterFreeMode(runtime)
+
+      let down = runtime.handle(
+        .keyboard(
+          KeyboardEvent(
+            key: .space, phase: .down, timestamp: 1, isAutoRepeat: false,
+            modifiers: modifiers)))
+      let repeated = runtime.handle(
+        .keyboard(
+          KeyboardEvent(
+            key: .space, phase: .down, timestamp: 1.1, isAutoRepeat: true,
+            modifiers: modifiers)))
+      let up = runtime.handle(
+        .keyboard(
+          KeyboardEvent(
+            key: .space, phase: .up, timestamp: 1.2, isAutoRepeat: false,
+            modifiers: [])))
+
+      XCTAssertEqual(down.disposition, .passThrough, "down with \(modifiers)")
+      XCTAssertEqual(repeated.disposition, .passThrough, "repeat with \(modifiers)")
+      XCTAssertEqual(up.disposition, .passThrough, "up with \(modifiers)")
+      XCTAssertTrue(down.effects.isEmpty)
+      XCTAssertTrue(repeated.effects.isEmpty)
+      XCTAssertTrue(up.effects.isEmpty)
+    }
+  }
+
+  func testShiftCapsLockAndRightOptionKeepMappedKeysConsumed() {
+    let modifiers: [KeyboardModifiers] = [
+      .leftShift, .rightShift, .capsLock, .rightOption,
+      [.leftShift, .rightOption], [.capsLock, .rightShift],
+    ]
+
+    for modifierState in modifiers {
+      let runtime = MouselessRuntime(permissions: .allGranted)
+      enterFreeMode(runtime)
+
+      let down = runtime.handle(
+        .keyboard(
+          KeyboardEvent(
+            key: .space, phase: .down, timestamp: 1, isAutoRepeat: false,
+            modifiers: modifierState)))
+      let repeated = runtime.handle(
+        .keyboard(
+          KeyboardEvent(
+            key: .space, phase: .down, timestamp: 1.1, isAutoRepeat: true,
+            modifiers: modifierState)))
+      let up = runtime.handle(
+        .keyboard(
+          KeyboardEvent(
+            key: .space, phase: .up, timestamp: 1.2, isAutoRepeat: false,
+            modifiers: [])))
+
+      XCTAssertEqual(down.disposition, .consume, "down with \(modifierState)")
+      XCTAssertEqual(down.effects, [.mouseButton(.left, .down)])
+      XCTAssertEqual(repeated.disposition, .consume, "repeat with \(modifierState)")
+      XCTAssertTrue(repeated.effects.isEmpty)
+      XCTAssertEqual(up.disposition, .consume, "up with \(modifierState)")
+      XCTAssertEqual(up.effects, [.mouseButton(.left, .up)])
+    }
+  }
+
+  func testACommandMappedKeyNeverStartsMovementOrAButtonEvenWhenModifiersChangeBeforeRelease() {
+    let runtime = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 100, y: 100))
+    enterFreeMode(runtime)
+
+    let down = runtime.handle(
+      .keyboard(
+        KeyboardEvent(
+          key: .l, phase: .down, timestamp: 1, isAutoRepeat: false,
+          modifiers: .leftCommand)))
+    let repeatDown = runtime.handle(
+      .keyboard(
+        KeyboardEvent(
+          key: .l, phase: .down, timestamp: 1.1, isAutoRepeat: true,
+          modifiers: .leftCommand)))
+    let frame = runtime.handle(.frame(deltaTime: 1))
+    let up = runtime.handle(
+      .keyboard(
+        KeyboardEvent(
+          key: .l, phase: .up, timestamp: 2, isAutoRepeat: false, modifiers: [])))
+
+    XCTAssertEqual(down.disposition, .passThrough)
+    XCTAssertEqual(repeatDown.disposition, .passThrough)
+    XCTAssertTrue(frame.effects.isEmpty)
+    XCTAssertEqual(up.disposition, .passThrough)
+    XCTAssertTrue(up.effects.isEmpty)
+  }
+
+  func testKeyDispositionIsChosenOnInitialDownAndSurvivesNormalModeExit() {
+    let runtime = MouselessRuntime(permissions: .allGranted)
+    enterFreeMode(runtime)
+    XCTAssertEqual(runtime.handle(.keyDown(.l, at: 1)).disposition, .consume)
+
+    _ = runtime.handle(.keyDown(.leftOption, at: 2))
+    let exit = runtime.handle(.keyUp(.leftOption, at: 2.1))
+    let up = runtime.handle(.keyUp(.l, at: 2.2))
+
+    XCTAssertTrue(exit.effects.contains(.modeChanged(isEnabled: false)))
+    XCTAssertEqual(up.disposition, .consume)
+    XCTAssertTrue(up.effects.isEmpty)
+  }
+
   func testMissingPermissionPassesThroughKeysAndCannotEnterFreeMode() {
     let runtime = MouselessRuntime(permissions: .none)
 
