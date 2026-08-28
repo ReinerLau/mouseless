@@ -518,8 +518,7 @@ public struct RuntimeEvent {
 }
 
 public struct KeyBindings: Codable, Equatable, Sendable {
-  public var toggle: String
-  public var escape: String
+  public var activation: String
   public var moveUp: String
   public var moveDown: String
   public var moveLeft: String
@@ -539,7 +538,7 @@ public struct KeyBindings: Codable, Equatable, Sendable {
   public var speedThree: String
 
   public init(
-    toggle: String = "leftOption", escape: String = "escape",
+    activation: String = "leftOption",
     moveUp: String = "i", moveDown: String = "k", moveLeft: String = "j", moveRight: String = "l",
     leftClick: String = "space", rightClick: String = "r", middleClick: String = "e",
     backClick: String = "q", forwardClick: String = "w", scrollUp: String = "m",
@@ -547,8 +546,7 @@ public struct KeyBindings: Codable, Equatable, Sendable {
     precision: String = "a", speedOne: String = "s", speedTwo: String = "d",
     speedThree: String = "f"
   ) {
-    self.toggle = toggle
-    self.escape = escape
+    self.activation = activation
     self.moveUp = moveUp
     self.moveDown = moveDown
     self.moveLeft = moveLeft
@@ -569,7 +567,7 @@ public struct KeyBindings: Codable, Equatable, Sendable {
   }
 
   private enum CodingKeys: String, CodingKey, CaseIterable {
-    case toggle, escape, moveUp, moveDown, moveLeft, moveRight, leftClick, rightClick, middleClick
+    case activation, moveUp, moveDown, moveLeft, moveRight, leftClick, rightClick, middleClick
     case backClick, forwardClick, scrollUp, scrollDown, scrollLeft, scrollRight, precision
     case speedOne, speedTwo, speedThree
   }
@@ -578,8 +576,7 @@ public struct KeyBindings: Codable, Equatable, Sendable {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     try rejectUnknownKeys(decoder, allowed: CodingKeys.allCases.map(\.stringValue))
     self.init(
-      toggle: try container.decode(String.self, forKey: .toggle),
-      escape: try container.decode(String.self, forKey: .escape),
+      activation: try container.decode(String.self, forKey: .activation),
       moveUp: try container.decode(String.self, forKey: .moveUp),
       moveDown: try container.decode(String.self, forKey: .moveDown),
       moveLeft: try container.decode(String.self, forKey: .moveLeft),
@@ -683,6 +680,68 @@ public struct IndicatorSettings: Codable, Equatable, Sendable {
   }
 }
 
+private struct LegacyKeyBindings: Codable {
+  let toggle: String
+  let escape: String
+  let moveUp: String
+  let moveDown: String
+  let moveLeft: String
+  let moveRight: String
+  let leftClick: String
+  let rightClick: String
+  let middleClick: String
+  let backClick: String
+  let forwardClick: String
+  let scrollUp: String
+  let scrollDown: String
+  let scrollLeft: String
+  let scrollRight: String
+  let precision: String
+  let speedOne: String
+  let speedTwo: String
+  let speedThree: String
+
+  private enum CodingKeys: String, CodingKey, CaseIterable {
+    case toggle, escape, moveUp, moveDown, moveLeft, moveRight, leftClick, rightClick, middleClick
+    case backClick, forwardClick, scrollUp, scrollDown, scrollLeft, scrollRight, precision
+    case speedOne, speedTwo, speedThree
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    try rejectUnknownKeys(decoder, allowed: CodingKeys.allCases.map(\.stringValue))
+    toggle = try container.decode(String.self, forKey: .toggle)
+    escape = try container.decode(String.self, forKey: .escape)
+    moveUp = try container.decode(String.self, forKey: .moveUp)
+    moveDown = try container.decode(String.self, forKey: .moveDown)
+    moveLeft = try container.decode(String.self, forKey: .moveLeft)
+    moveRight = try container.decode(String.self, forKey: .moveRight)
+    leftClick = try container.decode(String.self, forKey: .leftClick)
+    rightClick = try container.decode(String.self, forKey: .rightClick)
+    middleClick = try container.decode(String.self, forKey: .middleClick)
+    backClick = try container.decode(String.self, forKey: .backClick)
+    forwardClick = try container.decode(String.self, forKey: .forwardClick)
+    scrollUp = try container.decode(String.self, forKey: .scrollUp)
+    scrollDown = try container.decode(String.self, forKey: .scrollDown)
+    scrollLeft = try container.decode(String.self, forKey: .scrollLeft)
+    scrollRight = try container.decode(String.self, forKey: .scrollRight)
+    precision = try container.decode(String.self, forKey: .precision)
+    speedOne = try container.decode(String.self, forKey: .speedOne)
+    speedTwo = try container.decode(String.self, forKey: .speedTwo)
+    speedThree = try container.decode(String.self, forKey: .speedThree)
+  }
+
+  var migrated: KeyBindings {
+    KeyBindings(
+      activation: toggle, moveUp: moveUp, moveDown: moveDown, moveLeft: moveLeft,
+      moveRight: moveRight, leftClick: leftClick, rightClick: rightClick,
+      middleClick: middleClick, backClick: backClick, forwardClick: forwardClick,
+      scrollUp: scrollUp, scrollDown: scrollDown, scrollLeft: scrollLeft,
+      scrollRight: scrollRight, precision: precision, speedOne: speedOne,
+      speedTwo: speedTwo, speedThree: speedThree)
+  }
+}
+
 public struct RuntimeConfiguration: Codable, Equatable, Sendable {
   public var schemaVersion: Int
   public var bindings: KeyBindings
@@ -692,7 +751,7 @@ public struct RuntimeConfiguration: Codable, Equatable, Sendable {
   public var indicator: IndicatorSettings
 
   public init(
-    schemaVersion: Int = 1, bindings: KeyBindings = KeyBindings(),
+    schemaVersion: Int = 2, bindings: KeyBindings = KeyBindings(),
     movement: MotionSettings = MotionSettings(), scrolling: ScrollSettings = ScrollSettings(),
     optionTapMilliseconds: Double = 250, indicator: IndicatorSettings = IndicatorSettings()
   ) {
@@ -711,18 +770,32 @@ public struct RuntimeConfiguration: Codable, Equatable, Sendable {
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     try rejectUnknownKeys(decoder, allowed: CodingKeys.allCases.map(\.stringValue))
-    self.init(
-      schemaVersion: try container.decode(Int.self, forKey: .schemaVersion),
-      bindings: try container.decode(KeyBindings.self, forKey: .bindings),
-      movement: try container.decode(MotionSettings.self, forKey: .movement),
-      scrolling: try container.decode(ScrollSettings.self, forKey: .scrolling),
-      optionTapMilliseconds: try container.decode(Double.self, forKey: .optionTapMilliseconds),
-      indicator: try container.decode(IndicatorSettings.self, forKey: .indicator)
-    )
+    let schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+    guard schemaVersion == 1 || schemaVersion == 2 else {
+      throw ConfigurationError.unsupportedSchemaVersion(schemaVersion)
+    }
+    let movement = try container.decode(MotionSettings.self, forKey: .movement)
+    let scrolling = try container.decode(ScrollSettings.self, forKey: .scrolling)
+    let optionTapMilliseconds = try container.decode(Double.self, forKey: .optionTapMilliseconds)
+    let indicator = try container.decode(IndicatorSettings.self, forKey: .indicator)
+    switch schemaVersion {
+    case 1:
+      let legacy = try container.decode(LegacyKeyBindings.self, forKey: .bindings)
+      self.init(
+        schemaVersion: 2, bindings: legacy.migrated, movement: movement, scrolling: scrolling,
+        optionTapMilliseconds: optionTapMilliseconds, indicator: indicator)
+    case 2:
+      self.init(
+        schemaVersion: 2, bindings: try container.decode(KeyBindings.self, forKey: .bindings),
+        movement: movement, scrolling: scrolling, optionTapMilliseconds: optionTapMilliseconds,
+        indicator: indicator)
+    default:
+      throw ConfigurationError.unsupportedSchemaVersion(schemaVersion)
+    }
   }
 
   public func validated() throws -> RuntimeConfiguration {
-    guard schemaVersion == 1 else {
+    guard schemaVersion == 2 else {
       throw ConfigurationError.unsupportedSchemaVersion(schemaVersion)
     }
     try validate(
@@ -741,8 +814,12 @@ public struct RuntimeConfiguration: Codable, Equatable, Sendable {
       scrolling.smoothingMilliseconds, named: "scrolling.smoothingMilliseconds", range: 1...1_000)
     try validate(indicator.size, named: "indicator.size", range: 0.5...100)
 
+    let activation = Key(configurationName: bindings.activation)
+    guard activation == .leftOption || activation == .rightOption else {
+      throw ConfigurationError.invalidActivationKey(bindings.activation)
+    }
     let namedBindings = [
-      ("toggle", bindings.toggle), ("escape", bindings.escape), ("moveUp", bindings.moveUp),
+      ("activation", bindings.activation), ("moveUp", bindings.moveUp),
       ("moveDown", bindings.moveDown), ("moveLeft", bindings.moveLeft),
       ("moveRight", bindings.moveRight), ("leftClick", bindings.leftClick),
       ("rightClick", bindings.rightClick), ("middleClick", bindings.middleClick),
@@ -752,6 +829,9 @@ public struct RuntimeConfiguration: Codable, Equatable, Sendable {
       ("precision", bindings.precision), ("speedOne", bindings.speedOne),
       ("speedTwo", bindings.speedTwo), ("speedThree", bindings.speedThree),
     ]
+    if let reserved = namedBindings.first(where: { $0.1 == "escape" }) {
+      throw ConfigurationError.reservedKey(name: reserved.0, value: reserved.1)
+    }
     if let invalid = namedBindings.first(where: { !Key(configurationName: $0.1).isValidConfigurationKey }) {
       throw ConfigurationError.invalidKey(name: invalid.0, value: invalid.1)
     }
@@ -783,6 +863,8 @@ public enum ConfigurationError: Error, Equatable, Sendable, LocalizedError {
   case duplicateBindings([String])
   case invalidValue(name: String, description: String)
   case invalidKey(name: String, value: String)
+  case invalidActivationKey(String)
+  case reservedKey(name: String, value: String)
 
   public var errorDescription: String? {
     switch self {
@@ -798,6 +880,10 @@ public enum ConfigurationError: Error, Equatable, Sendable, LocalizedError {
       return "invalid configuration value for " + name + ": " + description
     case .invalidKey(let name, let value):
       return "unsupported key for " + name + ": " + value
+    case .invalidActivationKey(let value):
+      return "invalid activation key \(value); activation must be leftOption or rightOption"
+    case .reservedKey(let name, let value):
+      return "reserved key for \(name): \(value); physical Escape cannot be a Mouseless binding"
     }
   }
 }
@@ -865,8 +951,8 @@ public final class MouselessRuntime {
   private var keyboardDispositions: [Key: EventDisposition] = [:]
   private var activeModifiers: KeyboardModifiers = []
   private var heldButtons: Set<MouseButton> = []
-  private var optionDownAt: TimeInterval?
-  private var optionHadCombination = false
+  private var activationDownAt: TimeInterval?
+  private var activationHadCombination = false
   private var movementVelocity = Point(x: 0, y: 0)
   private var scrollVelocity = Point(x: 0, y: 0)
   private var scrollRemainder = Point(x: 0, y: 0)
@@ -960,8 +1046,8 @@ public final class MouselessRuntime {
         pressedKeys.removeAll()
         keyboardDispositions.removeAll()
         activeModifiers = []
-        optionDownAt = nil
-        optionHadCombination = false
+        activationDownAt = nil
+        activationHadCombination = false
         movementVelocity = Point(x: 0, y: 0)
         scrollVelocity = Point(x: 0, y: 0)
         scrollRemainder = Point(x: 0, y: 0)
@@ -1011,16 +1097,19 @@ public final class MouselessRuntime {
   private func keyDown(
     _ key: Key, timestamp: TimeInterval, isAutoRepeat: Bool, modifiers: KeyboardModifiers
   ) -> RuntimeResponse {
-    if key == configurationKey(named: configuration.bindings.toggle) {
+    if key == .leftOption, modeEnabled {
+      return RuntimeResponse(disposition: .passThrough, effects: safetyExitEffects())
+    }
+    if key == configurationKey(named: configuration.bindings.activation) {
       if !isAutoRepeat {
-        optionDownAt = timestamp
+        activationDownAt = timestamp
         let activationModifier = KeyboardModifiers.modifier(for: key) ?? []
-        optionHadCombination = !modifiers.subtracting(activationModifier).isEmpty
+        activationHadCombination = !modifiers.subtracting(activationModifier).isEmpty
         keyboardDispositions[key] = .passThrough
       }
       return RuntimeResponse(disposition: .passThrough)
     }
-    if optionDownAt != nil { optionHadCombination = true }
+    if activationDownAt != nil { activationHadCombination = true }
     if isAutoRepeat, let disposition = keyboardDispositions[key] {
       return RuntimeResponse(disposition: disposition)
     }
@@ -1046,10 +1135,6 @@ public final class MouselessRuntime {
         movementVelocity.y = 0
       }
     }
-    if key == configurationKey(named: configuration.bindings.escape) {
-      keyboardDispositions[key] = .consume
-      return RuntimeResponse(disposition: .consume, effects: safetyExitEffects())
-    }
     guard let button = button(for: key) else {
       let disposition: EventDisposition = isMappedKey(key) ? .consume : .passThrough
       if !isAutoRepeat {
@@ -1067,19 +1152,17 @@ public final class MouselessRuntime {
   }
 
   private func keyUp(_ key: Key, timestamp: TimeInterval) -> RuntimeResponse {
-    if key == configurationKey(named: configuration.bindings.toggle) {
+    if key == configurationKey(named: configuration.bindings.activation) {
       defer {
-        optionDownAt = nil
-        optionHadCombination = false
+        activationDownAt = nil
+        activationHadCombination = false
         keyboardDispositions.removeValue(forKey: key)
       }
-      guard permissions.isReady, let started = optionDownAt,
+      guard permissions.isReady, let started = activationDownAt,
         timestamp - started <= configuration.optionTapMilliseconds / 1_000,
-        !optionHadCombination
+        !activationHadCombination
       else { return RuntimeResponse(disposition: .passThrough) }
-      if modeEnabled {
-        return RuntimeResponse(disposition: .passThrough, effects: exitFreeModeEffects())
-      }
+      guard !modeEnabled else { return RuntimeResponse(disposition: .passThrough) }
       modeEnabled = true
       movementVelocity = Point(x: 0, y: 0)
       scrollVelocity = Point(x: 0, y: 0)
@@ -1103,21 +1186,6 @@ public final class MouselessRuntime {
     }
     pressedKeys.remove(key)
     return RuntimeResponse(disposition: .consume)
-  }
-
-  private func exitFreeModeEffects() -> [RuntimeEffect] {
-    var effects = heldButtons.sorted { $0.rawValue < $1.rawValue }.map {
-      RuntimeEffect.mouseButton($0, .up)
-    }
-    heldButtons.removeAll()
-    pressedKeys.removeAll()
-    movementVelocity = Point(x: 0, y: 0)
-    scrollVelocity = Point(x: 0, y: 0)
-    scrollRemainder = Point(x: 0, y: 0)
-    modeEnabled = false
-    effects.append(.modeChanged(isEnabled: false))
-    effects.append(.indicator(isVisible: false))
-    return effects
   }
 
   private func frame(deltaTime: TimeInterval) -> RuntimeResponse {
@@ -1164,8 +1232,8 @@ public final class MouselessRuntime {
     pressedKeys.removeAll()
     keyboardDispositions.removeAll()
     activeModifiers = []
-    optionDownAt = nil
-    optionHadCombination = false
+    activationDownAt = nil
+    activationHadCombination = false
     movementVelocity = Point(x: 0, y: 0)
     scrollVelocity = Point(x: 0, y: 0)
     scrollRemainder = Point(x: 0, y: 0)
@@ -1191,7 +1259,7 @@ public final class MouselessRuntime {
 
   private func isMappedKey(_ key: Key) -> Bool {
     let values = [
-      configuration.bindings.escape, configuration.bindings.moveUp, configuration.bindings.moveDown,
+      configuration.bindings.moveUp, configuration.bindings.moveDown,
       configuration.bindings.moveLeft, configuration.bindings.moveRight,
       configuration.bindings.leftClick,
       configuration.bindings.rightClick, configuration.bindings.middleClick,

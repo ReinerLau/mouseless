@@ -2,7 +2,6 @@ import CoreGraphics
 import Foundation
 
 private let optionKey: CGKeyCode = 58
-private let escapeKey: CGKeyCode = 53
 private let spaceKey: CGKeyCode = 49
 private let rKey: CGKeyCode = 15
 private let eKey: CGKeyCode = 14
@@ -171,8 +170,7 @@ func run() -> Int32 {
       let observed = capture.events.map { "\($0.type.rawValue)/\($0.button)" }.joined(separator: ",")
       fputs("Observed events: [\(observed)]\n", stderr)
       fputs("FAIL: missing paired \(name) mouse events.\n", stderr)
-      postKey(escapeKey, isDown: true)
-      postKey(escapeKey, isDown: false)
+      tapOption()
       return 1
     }
     print("PASS: \(name) click produced paired mouse events.")
@@ -194,8 +192,7 @@ func run() -> Int32 {
       $0.type == draggedEventType(for: button) && $0.button == button.rawValue
     }) else {
       fputs("FAIL: holding the \(name) button did not produce a dragged event.\n", stderr)
-      postKey(escapeKey, isDown: true)
-      postKey(escapeKey, isDown: false)
+      tapOption()
       return 1
     }
     print("PASS: \(name)-button drag produced dragged events.")

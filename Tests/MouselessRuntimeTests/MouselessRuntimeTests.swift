@@ -129,17 +129,17 @@ final class MouselessRuntimeTests: XCTestCase {
     XCTAssertTrue(up.effects.isEmpty)
   }
 
-  func testKeyDispositionIsChosenOnInitialDownAndSurvivesNormalModeExit() {
+  func testFixedSafetyExitReleasesButtonsAndClearsKeyboardDispositions() {
     let runtime = MouselessRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
     XCTAssertEqual(runtime.handle(.keyDown(.l, at: 1)).disposition, .consume)
 
-    _ = runtime.handle(.keyDown(.leftOption, at: 2))
-    let exit = runtime.handle(.keyUp(.leftOption, at: 2.1))
+    let exit = runtime.handle(.keyDown(.leftOption, at: 2))
+    _ = runtime.handle(.keyUp(.leftOption, at: 2.1))
     let up = runtime.handle(.keyUp(.l, at: 2.2))
 
     XCTAssertTrue(exit.effects.contains(.modeChanged(isEnabled: false)))
-    XCTAssertEqual(up.disposition, .consume)
+    XCTAssertEqual(up.disposition, .passThrough)
     XCTAssertTrue(up.effects.isEmpty)
   }
 
@@ -190,28 +190,62 @@ final class MouselessRuntimeTests: XCTestCase {
     XCTAssertFalse(combination.effects.contains(.modeChanged(isEnabled: true)))
   }
 
-  func testRightOptionNeverTogglesFreeMode() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+  func testRightOptionEntersWhenConfiguredAsActivationAndLeftOptionIsFixedSafetyExit() {
+    let runtime = MouselessRuntime(
+      configuration: RuntimeConfiguration(bindings: KeyBindings(activation: "rightOption")),
+      permissions: .allGranted)
 
-    _ = runtime.handle(.keyDown(.rightOption, at: 0))
-    let response = runtime.handle(.keyUp(.rightOption, at: 0.1))
+    XCTAssertEqual(runtime.handle(.keyDown(.rightOption, at: 0)).disposition, .passThrough)
+    let entered = runtime.handle(.keyUp(.rightOption, at: 0.1))
+    XCTAssertTrue(entered.effects.contains(.modeChanged(isEnabled: true)))
 
-    XCTAssertEqual(response.disposition, .passThrough)
-    XCTAssertFalse(response.effects.contains(.modeChanged(isEnabled: true)))
+    let leftDown = runtime.handle(.keyDown(.leftOption, at: 1))
+    XCTAssertEqual(leftDown.disposition, .passThrough)
+    XCTAssertTrue(leftDown.effects.contains(.modeChanged(isEnabled: false)))
+    XCTAssertTrue(leftDown.effects.contains(.indicator(isVisible: false)))
+    XCTAssertEqual(runtime.handle(.keyUp(.leftOption, at: 1.5)).disposition, .passThrough)
   }
 
-  func testOnlyMappedKeysAreConsumedInFreeModeAndEscapeExits() {
+  func testConfiguredActivationDoesNotExitFreeModeAndModifiersCancelItsTap() {
+    let runtime = MouselessRuntime(
+      configuration: RuntimeConfiguration(bindings: KeyBindings(activation: "rightOption")),
+      permissions: .allGranted)
+
+    _ = runtime.handle(.keyDown(.rightOption, at: 0))
+    let canceled = runtime.handle(
+      .keyboard(
+        KeyboardEvent(
+          key: .rightCommand, phase: .down, timestamp: 0.01, isAutoRepeat: false,
+          modifiers: [.rightCommand, .rightOption])))
+    XCTAssertEqual(canceled.disposition, .passThrough)
+    XCTAssertFalse(
+      runtime.handle(.keyUp(.rightOption, at: 0.1)).effects.contains(.modeChanged(isEnabled: true)))
+
+    _ = runtime.handle(.keyDown(.rightOption, at: 1))
+    _ = runtime.handle(.keyUp(.rightOption, at: 1.1))
+    XCTAssertTrue(runtime.handle(.keyDown(.rightOption, at: 2)).effects.isEmpty)
+    let stillOn = runtime.handle(.keyUp(.rightOption, at: 2.1))
+    XCTAssertFalse(stillOn.effects.contains(.modeChanged(isEnabled: false)))
+  }
+
+  func testEscapeAlwaysPassesThroughWithoutChangingFreeMode() {
     let runtime = MouselessRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
 
     let unmapped = runtime.handle(.keyDown(.other(99), at: 1))
     let mapped = runtime.handle(.keyDown(.i, at: 1.1))
-    let escape = runtime.handle(.keyDown(.escape, at: 1.2))
+    let escapeDown = runtime.handle(.keyDown(.escape, at: 1.2))
+    let escapeRepeat = runtime.handle(.keyDown(.escape, at: 1.3, isAutoRepeat: true))
+    let escapeUp = runtime.handle(.keyUp(.escape, at: 1.4))
 
     XCTAssertEqual(unmapped.disposition, .passThrough)
     XCTAssertEqual(mapped.disposition, .consume)
-    XCTAssertEqual(escape.disposition, .consume)
-    XCTAssertTrue(escape.effects.contains(.modeChanged(isEnabled: false)))
+    XCTAssertEqual(escapeDown.disposition, .passThrough)
+    XCTAssertEqual(escapeRepeat.disposition, .passThrough)
+    XCTAssertEqual(escapeUp.disposition, .passThrough)
+    XCTAssertTrue(escapeDown.effects.isEmpty)
+    XCTAssertTrue(escapeRepeat.effects.isEmpty)
+    XCTAssertTrue(escapeUp.effects.isEmpty)
   }
 
   func testMovementUsesTimeBasedSpeedAndNormalizesDiagonalInput() {
@@ -386,14 +420,14 @@ final class MouselessRuntimeTests: XCTestCase {
     XCTAssertEqual(up.effects, [.mouseButton(.left, .up)])
 
     _ = runtime.handle(.keyDown(.r, at: 2))
-    let exit = runtime.handle(.keyDown(.escape, at: 2.1))
+    let exit = runtime.handle(.keyDown(.leftOption, at: 2.1))
     XCTAssertTrue(exit.effects.contains(.mouseButton(.right, .up)))
 
     let second = MouselessRuntime(permissions: .allGranted)
     enterFreeMode(second)
     _ = second.handle(.keyDown(.space, at: 3))
-    _ = second.handle(.keyDown(.leftOption, at: 4))
-    let tapExit = second.handle(.keyUp(.leftOption, at: 4.1))
+    let tapExit = second.handle(.keyDown(.leftOption, at: 4))
+    _ = second.handle(.keyUp(.leftOption, at: 4.1))
     XCTAssertTrue(tapExit.effects.contains(.mouseButton(.left, .up)))
     XCTAssertTrue(tapExit.effects.contains(.modeChanged(isEnabled: false)))
   }
@@ -502,7 +536,7 @@ final class MouselessRuntimeTests: XCTestCase {
           effects += runtime.handle(.keyUp(key, at: timestamp)).effects
         }
       }
-      effects += runtime.handle(.keyDown(.escape, at: 10_000)).effects
+      effects += runtime.handle(.keyDown(.leftOption, at: 10_000)).effects
 
       var balances = Dictionary(uniqueKeysWithValues: MouseButton.allCases.map { ($0, 0) })
       for effect in effects {
@@ -522,7 +556,7 @@ final class MouselessRuntimeTests: XCTestCase {
         XCTAssertEqual(
           runtime.handle(.keyUp(key, at: 10_003)).effects, [.mouseButton(button, .up)])
       }
-      _ = runtime.handle(.keyDown(.escape, at: 10_004))
+      _ = runtime.handle(.keyDown(.leftOption, at: 10_004))
     }
   }
 
@@ -877,6 +911,134 @@ final class MouselessRuntimeTests: XCTestCase {
     }))
   }
 
+  func testDefaultConfigurationUsesSchemaV2ActivationWithoutEscapeBinding() throws {
+    let object = try configurationObject()
+    XCTAssertEqual(object["schemaVersion"] as? Int, 2)
+    let bindings = try XCTUnwrap(object["bindings"] as? [String: Any])
+    XCTAssertEqual(bindings["activation"] as? String, "leftOption")
+    XCTAssertNil(bindings["toggle"])
+    XCTAssertNil(bindings["escape"])
+  }
+
+  func testSchemaV2AcceptsOnlyLeftOrRightOptionAsActivation() throws {
+    for activation in ["leftOption", "rightOption"] {
+      var object = try configurationObject()
+      var bindings = try XCTUnwrap(object["bindings"] as? [String: Any])
+      bindings["activation"] = activation
+      object["bindings"] = bindings
+
+      let response = MouselessRuntime(permissions: .allGranted).handle(
+        .configuration(try JSONSerialization.data(withJSONObject: object)))
+      XCTAssertTrue(response.effects.contains(.configurationAccepted), activation)
+    }
+
+    var invalid = try configurationObject()
+    var bindings = try XCTUnwrap(invalid["bindings"] as? [String: Any])
+    bindings["activation"] = "space"
+    invalid["bindings"] = bindings
+    let response = MouselessRuntime(permissions: .allGranted).handle(
+      .configuration(try JSONSerialization.data(withJSONObject: invalid)))
+    XCTAssertTrue(response.effects.contains(where: { effect in
+      if case .configurationRejected(let reason) = effect {
+        return reason.contains("activation") && reason.contains("leftOption")
+          && reason.contains("rightOption")
+      }
+      return false
+    }))
+  }
+
+  func testSchemaV2RejectsRemovedEscapeAndEscapeAsAnyAction() throws {
+    var withRemovedField = try configurationObject()
+    var bindings = try XCTUnwrap(withRemovedField["bindings"] as? [String: Any])
+    bindings["escape"] = "escape"
+    withRemovedField["bindings"] = bindings
+    let removedResponse = MouselessRuntime(permissions: .allGranted).handle(
+      .configuration(try JSONSerialization.data(withJSONObject: withRemovedField)))
+    XCTAssertTrue(removedResponse.effects.contains(where: { effect in
+      if case .configurationRejected(let reason) = effect { return reason.contains("unknown field") }
+      return false
+    }))
+
+    var asAction = try configurationObject()
+    var actionBindings = try XCTUnwrap(asAction["bindings"] as? [String: Any])
+    actionBindings["moveUp"] = "escape"
+    asAction["bindings"] = actionBindings
+    let actionResponse = MouselessRuntime(permissions: .allGranted).handle(
+      .configuration(try JSONSerialization.data(withJSONObject: asAction)))
+    XCTAssertTrue(actionResponse.effects.contains(where: { effect in
+      if case .configurationRejected(let reason) = effect {
+        return reason.contains("Escape") || reason.contains("escape")
+      }
+      return false
+    }))
+  }
+
+  func testSchemaV1MigratesOptionToggleAndDropsEscapeBinding() throws {
+    var object = try configurationObject()
+    object["schemaVersion"] = 1
+    var bindings = try XCTUnwrap(object["bindings"] as? [String: Any])
+    bindings.removeValue(forKey: "activation")
+    bindings["toggle"] = "rightOption"
+    bindings["escape"] = "escape"
+    bindings["moveUp"] = "l"
+    bindings["moveRight"] = "i"
+    object["bindings"] = bindings
+
+    let runtime = MouselessRuntime(permissions: .allGranted)
+    let response = runtime.handle(
+      .configuration(try JSONSerialization.data(withJSONObject: object)))
+    XCTAssertTrue(response.effects.contains(.configurationAccepted))
+
+    _ = runtime.handle(.keyDown(.rightOption, at: 0))
+    XCTAssertTrue(runtime.handle(.keyUp(.rightOption, at: 0.1)).effects.contains(.modeChanged(isEnabled: true)))
+    XCTAssertEqual(runtime.handle(.keyDown(.escape, at: 1)).disposition, .passThrough)
+    XCTAssertEqual(runtime.handle(.keyDown(.l, at: 2)).disposition, .consume)
+  }
+
+  func testSchemaV1RejectsNonOptionToggleWithExplicitActivationError() throws {
+    for toggle in ["i", "space", "escape"] {
+      var object = try configurationObject()
+      object["schemaVersion"] = 1
+      var bindings = try XCTUnwrap(object["bindings"] as? [String: Any])
+      bindings.removeValue(forKey: "activation")
+      bindings["toggle"] = toggle
+      bindings["escape"] = "escape"
+      object["bindings"] = bindings
+
+      let response = MouselessRuntime(permissions: .allGranted).handle(
+        .configuration(try JSONSerialization.data(withJSONObject: object)))
+      XCTAssertTrue(response.effects.contains(where: { effect in
+        if case .configurationRejected(let reason) = effect {
+          return reason.contains("activation") && reason.contains("leftOption")
+            && reason.contains("rightOption")
+        }
+        return false
+      }), toggle)
+    }
+  }
+
+  func testRejectedMigrationLeavesPreviousV2ConfigurationActive() throws {
+    let runtime = MouselessRuntime(permissions: .allGranted)
+    _ = runtime.handle(.configuration(RuntimeConfiguration.defaultJSON))
+
+    var invalid = try configurationObject()
+    invalid["schemaVersion"] = 1
+    var bindings = try XCTUnwrap(invalid["bindings"] as? [String: Any])
+    bindings.removeValue(forKey: "activation")
+    bindings["toggle"] = "space"
+    bindings["escape"] = "escape"
+    invalid["bindings"] = bindings
+    let rejected = runtime.handle(
+      .configuration(try JSONSerialization.data(withJSONObject: invalid)))
+    XCTAssertTrue(rejected.effects.contains(where: { effect in
+      if case .configurationRejected = effect { return true }
+      return false
+    }))
+
+    _ = runtime.handle(.keyDown(.leftOption, at: 0))
+    XCTAssertTrue(runtime.handle(.keyUp(.leftOption, at: 0.1)).effects.contains(.modeChanged(isEnabled: true)))
+  }
+
   func testAcceptedConfigurationReleasesButtonsBeforeReplacingBindings() throws {
     let runtime = MouselessRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
@@ -996,14 +1158,14 @@ final class MouselessRuntimeTests: XCTestCase {
 
   func testConfigurationRejectsUnsupportedSchemaVersion() throws {
     var object = try configurationObject()
-    object["schemaVersion"] = 2
+    object["schemaVersion"] = 3
 
     let response = MouselessRuntime(permissions: .allGranted).handle(
       .configuration(try JSONSerialization.data(withJSONObject: object)))
 
     XCTAssertTrue(response.effects.contains(where: { effect in
       if case .configurationRejected(let reason) = effect {
-        return reason.contains("schema version") && reason.contains("2")
+        return reason.contains("schema version") && reason.contains("3")
       }
       return false
     }))

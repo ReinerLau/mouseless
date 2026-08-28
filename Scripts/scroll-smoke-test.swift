@@ -2,7 +2,6 @@ import CoreGraphics
 import Foundation
 
 private let optionKey: CGKeyCode = 58
-private let escapeKey: CGKeyCode = 53
 private let mKey: CGKeyCode = 46
 private let commaKey: CGKeyCode = 43
 private let periodKey: CGKeyCode = 47
@@ -127,8 +126,7 @@ func run() -> Int32 {
       fputs(
         "FAIL: \(binding.name) produced unexpected scroll delta (horizontal=\(result.horizontal), vertical=\(result.vertical)).\n",
         stderr)
-      postKey(escapeKey, isDown: true)
-      postKey(escapeKey, isDown: false)
+      tapOption()
       return 1
     }
     print("PASS: \(binding.name) produced the expected scroll direction.")

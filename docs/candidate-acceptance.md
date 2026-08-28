@@ -55,11 +55,11 @@ Record a check only after observing the result in the real app:
 - [ ] First launch creates the default configuration and the permission menu clearly reports each missing capability.
 - [ ] Accessibility, Listen Event, and Post Event can be granted from the requested flow; incomplete permissions pass keys through and cannot enter free mode.
 - [ ] Rebuilding with the fixed identity preserves the existing TCC grant.
-- [ ] Left Option enters and exits free mode; Escape is an emergency exit; ordinary application switching leaves free mode unchanged.
+- [ ] Left Option enters and exits free mode as the fixed safety exit; Escape's down, repeat, and up events pass through; ordinary application switching leaves free mode unchanged.
 - [ ] Immediately after entering free mode, the blue indicator is at the current pointer location within one display refresh; I/J/K/L move up/left/down/right, including diagonals and opposing directions.
 - [ ] A precision key, each fast key, and stacked fast keys produce the expected ordered speeds; at both 60 Hz and 120 Hz, equal movement and scroll hold times produce approximately equal distances.
 - [ ] Movement crosses a reachable multi-display boundary and respects non-standard/negative display coordinates and display gaps.
-- [ ] Space/R/E/Q/W produce paired left/right/middle/back/forward button events; holding each while moving produces drag events; all buttons release on Escape and every safety exit.
+- [ ] Space/R/E/Q/W produce paired left/right/middle/back/forward button events; holding each while moving produces drag events; all buttons release on Left Option and every safety exit.
 - [ ] M/comma/period/slash produce the four scroll directions, including diagonal scrolling, low-speed scrolling, and precision/fast multipliers.
 - [ ] Physical mouse and trackpad movement still works in free mode, and keyboard movement resumes from the physical pointer location.
 - [ ] Valid configuration reload applies atomically; malformed, unknown-field, or out-of-range configuration keeps the previous valid behavior and reports the error.

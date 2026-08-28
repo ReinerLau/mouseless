@@ -2,7 +2,6 @@ import CoreGraphics
 import Foundation
 
 private let optionKey: CGKeyCode = 58
-private let escapeKey: CGKeyCode = 53
 private let rightMovementKey: CGKeyCode = 37
 private let eventSource = CGEventSource(stateID: .combinedSessionState)
 
@@ -38,8 +37,8 @@ private func pointerLocation() -> CGPoint {
 
 if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "cleanup" {
   postKey(rightMovementKey, isDown: false)
-  postKey(escapeKey, isDown: true)
-  postKey(escapeKey, isDown: false)
+  postKey(optionKey, isDown: true)
+  postKey(optionKey, isDown: false)
   exit(0)
 }
 
@@ -58,8 +57,8 @@ Thread.sleep(forTimeInterval: duration)
 postKey(rightMovementKey, isDown: false)
 Thread.sleep(forTimeInterval: 0.1)
 let end = pointerLocation()
-postKey(escapeKey, isDown: true)
-postKey(escapeKey, isDown: false)
+postKey(optionKey, isDown: true)
+postKey(optionKey, isDown: false)
 
 guard end.x > start.x + 10 else {
   fputs("Mouseless did not produce measurable rightward movement.\n", stderr)
