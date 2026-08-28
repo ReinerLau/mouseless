@@ -793,7 +793,7 @@ struct MouselessAppMain {
     let controller = MouselessApplicationController()
     let delegate = AppDelegate(controller: controller)
     application.delegate = delegate
-    application.setActivationPolicy(.accessory)
+    application.setActivationPolicy(.regular)
     application.run()
     withExtendedLifetime(controller) {}
   }
