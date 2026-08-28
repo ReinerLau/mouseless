@@ -20,6 +20,81 @@ private let scrollBindings = [
 ]
 
 final class MouselessRuntimeTests: XCTestCase {
+  func testStartupPublishesAvailableStatusAfterPermissionsAndEventTapAreReady() {
+    let runtime = MouselessRuntime()
+
+    XCTAssertEqual(runtime.freeModeStatus, .unavailable)
+    XCTAssertFalse(
+      runtime.handle(.permissionsChanged(.allGranted)).effects.contains(
+        .freeModeStatusChanged(.available)))
+
+    let response = runtime.handle(.eventTapReady)
+
+    XCTAssertTrue(response.effects.contains(.freeModeStatusChanged(.available)))
+  }
+
+  func testFreeModeStatusUsesDistinctSymbolsAndAccessibilityDescriptions() {
+    XCTAssertEqual(FreeModeStatus.available.menuBarTitle, "Mouseless ○")
+    XCTAssertEqual(FreeModeStatus.enabled.menuBarTitle, "Mouseless ●")
+    XCTAssertEqual(FreeModeStatus.unavailable.menuBarTitle, "Mouseless !")
+    XCTAssertTrue(FreeModeStatus.available.accessibilityDescription.contains("off"))
+    XCTAssertTrue(FreeModeStatus.enabled.accessibilityDescription.contains("on"))
+    XCTAssertTrue(FreeModeStatus.unavailable.accessibilityDescription.contains("unavailable"))
+  }
+
+  func testEnteringAndLeavingFreeModePublishesAuthoritativeStatus() {
+    let runtime = MouselessRuntime(permissions: .allGranted)
+
+    _ = runtime.handle(.keyDown(.leftOption, at: 0))
+    let entered = runtime.handle(.keyUp(.leftOption, at: 0.1))
+    XCTAssertEqual(runtime.freeModeStatus, .enabled)
+    XCTAssertTrue(entered.effects.contains(.freeModeStatusChanged(.enabled)))
+
+    let exited = runtime.handle(.keyDown(.leftOption, at: 1))
+    XCTAssertEqual(runtime.freeModeStatus, .available)
+    XCTAssertTrue(exited.effects.contains(.freeModeStatusChanged(.available)))
+  }
+
+  func testPermissionRevocationAndRecoveryNeverAutomaticallyReenableFreeMode() {
+    let runtime = MouselessRuntime(permissions: .allGranted)
+    _ = runtime.handle(.keyDown(.leftOption, at: 0))
+    _ = runtime.handle(.keyUp(.leftOption, at: 0.1))
+
+    let revoked = runtime.handle(.permissionsChanged(.none))
+    XCTAssertEqual(runtime.freeModeStatus, .unavailable)
+    XCTAssertTrue(revoked.effects.contains(.freeModeStatusChanged(.unavailable)))
+
+    _ = runtime.handle(.permissionsChanged(.allGranted))
+    let restored = runtime.handle(.eventTapReady)
+    XCTAssertEqual(runtime.freeModeStatus, .available)
+    XCTAssertTrue(restored.effects.contains(.freeModeStatusChanged(.available)))
+  }
+
+  func testEventTapRecoveryStatesPublishStatusAndRejectActivationWhileUnavailable() {
+    let runtime = MouselessRuntime(permissions: .allGranted)
+
+    let disabled = runtime.handle(.eventTapDisabled)
+    XCTAssertEqual(runtime.freeModeStatus, .unavailable)
+    XCTAssertTrue(disabled.effects.contains(.freeModeStatusChanged(.unavailable)))
+
+    let permissionRecheck = runtime.handle(.permissionsChanged(.allGranted))
+    XCTAssertEqual(runtime.freeModeStatus, .unavailable)
+    XCTAssertFalse(permissionRecheck.effects.contains(.freeModeStatusChanged(.available)))
+
+    _ = runtime.handle(.keyDown(.leftOption, at: 1))
+    let rejected = runtime.handle(.keyUp(.leftOption, at: 1.1))
+    XCTAssertEqual(runtime.freeModeStatus, .unavailable)
+    XCTAssertFalse(rejected.effects.contains(.modeChanged(isEnabled: true)))
+
+    let recovered = runtime.handle(.eventTapReenabled)
+    XCTAssertEqual(runtime.freeModeStatus, .available)
+    XCTAssertTrue(recovered.effects.contains(.freeModeStatusChanged(.available)))
+
+    let failed = runtime.handle(.eventTapRecoveryFailed)
+    XCTAssertEqual(runtime.freeModeStatus, .unavailable)
+    XCTAssertTrue(failed.effects.contains(.freeModeStatusChanged(.unavailable)))
+  }
+
   func testKeyboardEventPublicInterfaceCarriesPhysicalKeyLifecycleAndModifiers() {
     let event = KeyboardEvent(
       key: .i, phase: .down, timestamp: 12.5, isAutoRepeat: true,
@@ -1282,7 +1357,9 @@ final class MouselessRuntimeTests: XCTestCase {
     XCTAssertTrue(response.effects.contains(.modeChanged(isEnabled: false)))
 
     let recovered = runtime.handle(.eventTapReenabled)
-    XCTAssertEqual(recovered.effects, [.diagnostic(.eventTapRecovered)])
+    XCTAssertEqual(
+      recovered.effects,
+      [.diagnostic(.eventTapRecovered), .freeModeStatusChanged(.available)])
   }
 
   func testEventTapRecoveryFailureExitsAndReturnsAllKeyboardEvents() {

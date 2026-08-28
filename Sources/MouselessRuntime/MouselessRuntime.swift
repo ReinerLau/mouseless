@@ -402,6 +402,7 @@ private func singleLine(_ value: String) -> String {
 
 public enum RuntimeEffect: Equatable, Sendable {
   case capabilitiesChanged(PermissionState)
+  case freeModeStatusChanged(FreeModeStatus)
   case modeChanged(isEnabled: Bool)
   case indicator(isVisible: Bool)
   case indicatorSizeChanged(size: Double)
@@ -413,6 +414,30 @@ public enum RuntimeEffect: Equatable, Sendable {
   case configurationRejected(reason: String)
   case eventTapShouldBeReenabled
   case diagnostic(Diagnostic)
+}
+
+public enum FreeModeStatus: String, Equatable, Sendable {
+  case available
+  case enabled
+  case unavailable
+
+  public var symbol: String {
+    switch self {
+    case .available: return "○"
+    case .enabled: return "●"
+    case .unavailable: return "!"
+    }
+  }
+
+  public var menuBarTitle: String { "Mouseless \(symbol)" }
+
+  public var accessibilityDescription: String {
+    switch self {
+    case .available: return "Mouseless: available; free mode is off."
+    case .enabled: return "Mouseless: enabled; free mode is on."
+    case .unavailable: return "Mouseless: unavailable; free mode is off."
+    }
+  }
 }
 
 public struct RuntimeResponse: Equatable, Sendable {
@@ -442,6 +467,7 @@ public struct RuntimeEvent {
     case topologyChanged(DisplayTopology)
     case permissionsChanged(PermissionState)
     case sessionChanged(SessionState)
+    case eventTapReady
     case eventTapDisabled
     case eventTapReenabled
     case eventTapRecoveryFailed
@@ -505,6 +531,8 @@ public struct RuntimeEvent {
   }
 
   public static let eventTapDisabled = RuntimeEvent(kind: .eventTapDisabled)
+
+  public static let eventTapReady = RuntimeEvent(kind: .eventTapReady)
 
   public static let eventTapReenabled = RuntimeEvent(kind: .eventTapReenabled)
 
@@ -943,6 +971,7 @@ private func decodingErrorDescription(_ error: Error) -> String {
 public final class MouselessRuntime {
   private var configuration: RuntimeConfiguration
   private var permissions: PermissionState
+  private var eventTapHealthy: Bool
   private var modeEnabled = false
   private var topology: DisplayTopology
   private var pointer = Point(x: 0, y: 0)
@@ -964,6 +993,7 @@ public final class MouselessRuntime {
   ) {
     self.configuration = (try? configuration.validated()) ?? RuntimeConfiguration()
     self.permissions = permissions
+    self.eventTapHealthy = permissions.isReady
     self.topology = topology
     self.pointer = topology.projected(pointer)
     self.movementPoint = self.pointer
@@ -1005,11 +1035,14 @@ public final class MouselessRuntime {
       return RuntimeResponse(
         disposition: .passThrough, effects: [.pointerPositionChanged(to: pointer)])
     case .permissionsChanged(let newPermissions):
+      let previousStatus = freeModeStatus
       permissions = newPermissions
+      if !newPermissions.isReady { eventTapHealthy = false }
       var effects = [RuntimeEffect.capabilitiesChanged(newPermissions)]
       if !newPermissions.isReady {
         effects.append(contentsOf: safetyExitEffects(emitDiagnostic: true))
       }
+      effects.append(contentsOf: freeModeStatusEffects(changedFrom: previousStatus))
       return RuntimeResponse(disposition: .passThrough, effects: effects)
     case .sessionChanged(let state):
       switch state {
@@ -1021,19 +1054,35 @@ public final class MouselessRuntime {
         return RuntimeResponse(
           disposition: .passThrough, effects: safetyExitEffects(emitDiagnostic: true))
       }
+    case .eventTapReady:
+      let previousStatus = freeModeStatus
+      eventTapHealthy = permissions.isReady
+      return RuntimeResponse(
+        disposition: .passThrough,
+        effects: freeModeStatusEffects(changedFrom: previousStatus))
     case .eventTapDisabled:
+      let previousStatus = freeModeStatus
+      eventTapHealthy = false
       var effects = safetyExitEffects(emitDiagnostic: true)
       effects.append(.eventTapShouldBeReenabled)
       effects.append(.diagnostic(.eventTapDisabled))
+      effects.append(contentsOf: freeModeStatusEffects(changedFrom: previousStatus))
       return RuntimeResponse(
         disposition: .passThrough,
         effects: effects)
     case .eventTapReenabled:
+      let previousStatus = freeModeStatus
+      eventTapHealthy = permissions.isReady
+      var effects = [RuntimeEffect.diagnostic(.eventTapRecovered)]
+      effects.append(contentsOf: freeModeStatusEffects(changedFrom: previousStatus))
       return RuntimeResponse(
-        disposition: .passThrough, effects: [.diagnostic(.eventTapRecovered)])
+        disposition: .passThrough, effects: effects)
     case .eventTapRecoveryFailed:
+      let previousStatus = freeModeStatus
+      eventTapHealthy = false
       var effects = safetyExitEffects(emitDiagnostic: true)
       effects.append(.diagnostic(.eventTapRecoveryFailed))
+      effects.append(contentsOf: freeModeStatusEffects(changedFrom: previousStatus))
       return RuntimeResponse(disposition: .passThrough, effects: effects)
     case .configuration(let data):
       do {
@@ -1080,6 +1129,11 @@ public final class MouselessRuntime {
       return RuntimeResponse(
         disposition: .passThrough, effects: safetyExitEffects(emitDiagnostic: true))
     }
+  }
+
+  public var freeModeStatus: FreeModeStatus {
+    guard permissions.isReady && eventTapHealthy else { return .unavailable }
+    return modeEnabled ? .enabled : .available
   }
 
   private func keyboard(_ event: KeyboardEvent) -> RuntimeResponse {
@@ -1158,21 +1212,22 @@ public final class MouselessRuntime {
         activationHadCombination = false
         keyboardDispositions.removeValue(forKey: key)
       }
-      guard permissions.isReady, let started = activationDownAt,
+      guard permissions.isReady, eventTapHealthy, let started = activationDownAt,
         timestamp - started <= configuration.optionTapMilliseconds / 1_000,
         !activationHadCombination
       else { return RuntimeResponse(disposition: .passThrough) }
       guard !modeEnabled else { return RuntimeResponse(disposition: .passThrough) }
+      let previousStatus = freeModeStatus
       modeEnabled = true
       movementVelocity = Point(x: 0, y: 0)
       scrollVelocity = Point(x: 0, y: 0)
-      return RuntimeResponse(
-        disposition: .passThrough,
-        effects: [
-          .modeChanged(isEnabled: true),
-          .indicatorSizeChanged(size: configuration.indicator.size),
-          .indicator(isVisible: configuration.indicator.enabled),
-        ])
+      var effects: [RuntimeEffect] = [
+        .modeChanged(isEnabled: true),
+        .indicatorSizeChanged(size: configuration.indicator.size),
+        .indicator(isVisible: configuration.indicator.enabled),
+      ]
+      effects.append(contentsOf: freeModeStatusEffects(changedFrom: previousStatus))
+      return RuntimeResponse(disposition: .passThrough, effects: effects)
     }
     guard permissions.isReady else {
       return RuntimeResponse(disposition: .passThrough)
@@ -1225,6 +1280,7 @@ public final class MouselessRuntime {
   }
 
   private func safetyExitEffects(emitDiagnostic: Bool = false) -> [RuntimeEffect] {
+    let previousStatus = freeModeStatus
     var effects = heldButtons.sorted { $0.rawValue < $1.rawValue }.map {
       RuntimeEffect.mouseButton($0, .up)
     }
@@ -1243,7 +1299,15 @@ public final class MouselessRuntime {
       effects.append(.indicator(isVisible: false))
     }
     if emitDiagnostic || !effects.isEmpty { effects.append(.diagnostic(.safetyExit)) }
+    effects.append(contentsOf: freeModeStatusEffects(changedFrom: previousStatus))
     return effects
+  }
+
+  private func freeModeStatusEffects(changedFrom previousStatus: FreeModeStatus)
+    -> [RuntimeEffect]
+  {
+    let status = freeModeStatus
+    return status == previousStatus ? [] : [.freeModeStatusChanged(status)]
   }
 
   private func configurationKey(named name: String) -> Key { Key(configurationName: name) }

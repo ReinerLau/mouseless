@@ -314,8 +314,6 @@ private final class MouselessApplicationController: NSObject {
   private let eventTapLock = NSLock()
   private var displayLink: CADisplayLink?
   private var statusItem: NSStatusItem?
-  private var statusMenuItem: NSMenuItem?
-  private var modeMenuItem: NSMenuItem?
   private var reloadMenuItem: NSMenuItem?
   private var configurationValid = true
   private var configurationError: String?
@@ -382,17 +380,9 @@ private final class MouselessApplicationController: NSObject {
 
   private func configureMenu() {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    item.button?.title = "Mouseless"
+    statusItem = item
+    updateStatus(runtime.freeModeStatus)
     let menu = NSMenu()
-    let status = NSMenuItem(title: "Permissions: checking…", action: nil, keyEquivalent: "")
-    status.isEnabled = false
-    menu.addItem(status)
-    statusMenuItem = status
-    let mode = NSMenuItem(title: "Free mode: Off", action: nil, keyEquivalent: "")
-    mode.isEnabled = false
-    menu.addItem(mode)
-    modeMenuItem = mode
-    menu.addItem(.separator())
     menu.addItem(menuItem("Request Permissions", #selector(requestPermissions)))
     menu.addItem(menuItem("Open System Settings", #selector(openSystemSettings)))
     menu.addItem(menuItem("Recheck Permissions", #selector(recheckPermissions)))
@@ -403,7 +393,6 @@ private final class MouselessApplicationController: NSObject {
     menu.addItem(.separator())
     menu.addItem(menuItem("Quit Mouseless", #selector(quit)))
     item.menu = menu
-    statusItem = item
   }
 
   private func menuItem(_ title: String, _ action: Selector) -> NSMenuItem {
@@ -428,12 +417,16 @@ private final class MouselessApplicationController: NSObject {
   private func reconcilePermissions(_ state: PermissionState, clearEventTapFailure: Bool = false) {
     var effectiveState = state
     var systemPathIsReady = false
+    var startedEventTap = false
     if state.isReady {
       if currentEventTap() == nil {
         let host = EventTapHost { [weak self] type, event in
           self?.handleTapEvent(type: type, event: event) ?? Unmanaged.passUnretained(event)
         }
-        if host.start() { setEventTap(host) }
+        if host.start() {
+          setEventTap(host)
+          startedEventTap = true
+        }
       }
       systemPathIsReady = currentEventTap() != nil && executor.postProbe()
       if !systemPathIsReady { effectiveState.postEvent = false }
@@ -515,7 +508,12 @@ private final class MouselessApplicationController: NSObject {
     default: response = RuntimeResponse(disposition: .passThrough)
     }
     enqueue(response)
-    return response.disposition == .consume ? nil : Unmanaged.passUnretained(event)
+    if response.disposition == .consume {
+      // Returning nil did not suppress keyboard delivery on macOS 26; a null event preserves
+      // active-filter semantics while preventing AppKit and input methods from producing text.
+      event.type = .null
+    }
+    return Unmanaged.passUnretained(event)
   }
 
   private func runtimeResponse(for event: RuntimeEvent) -> RuntimeResponse {
@@ -591,7 +589,8 @@ private final class MouselessApplicationController: NSObject {
     diagnostics.record(response)
     let uiEffects = response.effects.filter { effect in
       switch effect {
-      case .capabilitiesChanged, .modeChanged, .indicator, .pointerMoved, .configurationAccepted,
+      case .capabilitiesChanged, .freeModeStatusChanged, .modeChanged, .indicator, .pointerMoved,
+        .configurationAccepted,
         .indicatorSizeChanged, .pointerPositionChanged, .configurationRejected,
         .eventTapShouldBeReenabled, .diagnostic:
         return true
@@ -616,13 +615,12 @@ private final class MouselessApplicationController: NSObject {
   private func applyUI(_ effects: [RuntimeEffect]) {
     for effect in effects {
       switch effect {
+      case .freeModeStatusChanged(let status): updateStatus(status)
       case .capabilitiesChanged(let state):
-        updateStatus(state: state, message: state.isReady ? "Ready" : "Permissions required")
         logger.notice(
           "Capabilities changed: accessibility=\(state.accessibility), listenEvent=\(state.listenEvent), postEvent=\(state.postEvent)"
         )
       case .modeChanged(let isEnabled):
-        modeMenuItem?.title = "Free mode: \(isEnabled ? "On" : "Off")"
         logger.info("Free mode changed: enabled=\(isEnabled)")
       case .indicator(let isVisible): isVisible ? indicator.show() : indicator.hide()
       case .indicatorSizeChanged(let size): indicator.setSize(size)
@@ -646,8 +644,6 @@ private final class MouselessApplicationController: NSObject {
         logger.notice("Event tap recovered")
       case .diagnostic(.eventTapRecoveryFailed):
         eventTapStatus = .recoveryFailed
-        updateStatus(
-          state: permissions.current(prompt: false), message: "Event tap recovery failed")
         logger.error("Event tap recovery failed; free mode remains disabled")
       case .diagnostic(.safetyExit):
         logger.notice("Safety cleanup completed")
@@ -731,17 +727,12 @@ private final class MouselessApplicationController: NSObject {
 
   @objc private func quit() { NSApp.terminate(nil) }
 
-  private func updateStatus(state: PermissionState, message: String) {
-    statusMenuItem?.title = "Permissions: \(message)"
-    statusItem?.button?.title = state.isReady ? "Mouseless ✓" : "Mouseless !"
-  }
-
-  private func missingPermissions(_ state: PermissionState) -> String {
-    var missing: [String] = []
-    if !state.accessibility { missing.append("Accessibility") }
-    if !state.listenEvent { missing.append("Listen Event") }
-    if !state.postEvent { missing.append("Post Event") }
-    return missing.joined(separator: ", ")
+  private func updateStatus(_ status: FreeModeStatus) {
+    guard let button = statusItem?.button else { return }
+    button.title = status.menuBarTitle
+    button.toolTip = status.accessibilityDescription
+    button.setAccessibilityLabel(status.menuBarTitle)
+    button.setAccessibilityHelp(status.accessibilityDescription)
   }
 
   private func applicationVersion() -> String {
