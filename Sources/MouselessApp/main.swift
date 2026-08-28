@@ -190,7 +190,7 @@ private final class EventTapHost {
         | (CGEventMask(1) << CGEventType.otherMouseDragged.rawValue)
       guard
         let tap = CGEvent.tapCreate(
-          tap: .cghidEventTap, place: .headInsertEventTap, options: .defaultTap,
+          tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
           eventsOfInterest: mask, callback: eventTapCallback,
           userInfo: Unmanaged.passUnretained(self).toOpaque()),
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
@@ -417,7 +417,6 @@ private final class MouselessApplicationController: NSObject {
   private func reconcilePermissions(_ state: PermissionState, clearEventTapFailure: Bool = false) {
     var effectiveState = state
     var systemPathIsReady = false
-    var startedEventTap = false
     if state.isReady {
       if currentEventTap() == nil {
         let host = EventTapHost { [weak self] type, event in
@@ -425,7 +424,6 @@ private final class MouselessApplicationController: NSObject {
         }
         if host.start() {
           setEventTap(host)
-          startedEventTap = true
         }
       }
       systemPathIsReady = currentEventTap() != nil && executor.postProbe()
@@ -442,13 +440,8 @@ private final class MouselessApplicationController: NSObject {
     }
     apply(runtimeResponse(for: .permissionsChanged(effectiveState)))
     if systemPathIsReady {
-      updateStatus(
-        state: state,
-        message: eventTapStatus == .recoveryFailed ? "Event tap recovery failed" : "Ready")
-    } else if state.isReady {
-      updateStatus(state: state, message: "Permissions granted; event tap unavailable")
-    } else {
-      updateStatus(state: state, message: "Missing: \(missingPermissions(state))")
+      eventTapStatus = .healthy
+      apply(runtimeResponse(for: .eventTapReady))
     }
   }
 

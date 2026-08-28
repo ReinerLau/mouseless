@@ -864,10 +864,15 @@ final class MouselessRuntimeTests: XCTestCase {
     let sleeping = runtime.handle(.sessionChanged(.sleeping))
     XCTAssertTrue(sleeping.effects.contains(.mouseButton(.left, .up)))
     XCTAssertTrue(sleeping.effects.contains(.modeChanged(isEnabled: false)))
+    XCTAssertTrue(sleeping.effects.contains(.freeModeStatusChanged(.unavailable)))
+    XCTAssertEqual(runtime.freeModeStatus, .unavailable)
 
     XCTAssertTrue(runtime.handle(.sessionChanged(.waking)).effects.isEmpty)
     XCTAssertEqual(runtime.handle(.keyDown(.l, at: 2)).disposition, .passThrough)
-    XCTAssertEqual(runtime.handle(.sessionChanged(.active)).effects, [])
+    XCTAssertTrue(
+      runtime.handle(.sessionChanged(.active)).effects.contains(
+        .freeModeStatusChanged(.available)))
+    XCTAssertEqual(runtime.freeModeStatus, .available)
     XCTAssertEqual(runtime.handle(.keyDown(.l, at: 3)).disposition, .passThrough)
 
     enterFreeMode(runtime)
@@ -882,8 +887,27 @@ final class MouselessRuntimeTests: XCTestCase {
     let locked = runtime.handle(.sessionChanged(.locked))
     XCTAssertTrue(locked.effects.contains(.mouseButton(.left, .up)))
     XCTAssertTrue(locked.effects.contains(.modeChanged(isEnabled: false)))
-    XCTAssertEqual(runtime.handle(.sessionChanged(.active)).effects, [])
+    XCTAssertTrue(locked.effects.contains(.freeModeStatusChanged(.unavailable)))
+    XCTAssertEqual(runtime.freeModeStatus, .unavailable)
+    XCTAssertTrue(
+      runtime.handle(.sessionChanged(.active)).effects.contains(
+        .freeModeStatusChanged(.available)))
+    XCTAssertEqual(runtime.freeModeStatus, .available)
     XCTAssertEqual(runtime.handle(.keyDown(.l, at: 2)).disposition, .passThrough)
+  }
+
+  func testInactiveSessionPublishesUnavailableStatusUntilItBecomesActive() {
+    let runtime = MouselessRuntime(permissions: .allGranted)
+    enterFreeMode(runtime)
+
+    let inactive = runtime.handle(.sessionChanged(.inactive))
+
+    XCTAssertTrue(inactive.effects.contains(.freeModeStatusChanged(.unavailable)))
+    XCTAssertEqual(runtime.freeModeStatus, .unavailable)
+    XCTAssertTrue(
+      runtime.handle(.sessionChanged(.active)).effects.contains(
+        .freeModeStatusChanged(.available)))
+    XCTAssertEqual(runtime.freeModeStatus, .available)
   }
 
   func testSafetyEventsReleaseEveryHeldVirtualButton() {

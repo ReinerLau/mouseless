@@ -1061,6 +1061,7 @@ public final class MouselessRuntime {
   private var configuration: RuntimeConfiguration
   private var permissions: PermissionState
   private var eventTapHealthy: Bool
+  private var sessionIsActive = true
   private var modeEnabled = false
   private var topology: DisplayTopology
   private var pointer = Point(x: 0, y: 0)
@@ -1135,14 +1136,23 @@ public final class MouselessRuntime {
       effects.append(contentsOf: freeModeStatusEffects(changedFrom: previousStatus))
       return RuntimeResponse(disposition: .passThrough, effects: effects)
     case .sessionChanged(let state):
+      let previousStatus = freeModeStatus
       switch state {
       case .active:
-        return RuntimeResponse(disposition: .passThrough)
-      case .waking:
-        return RuntimeResponse(disposition: .passThrough, effects: safetyExitEffects())
-      case .inactive, .locked, .sleeping:
+        sessionIsActive = true
         return RuntimeResponse(
-          disposition: .passThrough, effects: safetyExitEffects(emitDiagnostic: true))
+          disposition: .passThrough,
+          effects: freeModeStatusEffects(changedFrom: previousStatus))
+      case .waking:
+        sessionIsActive = false
+        var effects = safetyExitEffects()
+        effects.append(contentsOf: freeModeStatusEffects(changedFrom: previousStatus))
+        return RuntimeResponse(disposition: .passThrough, effects: effects)
+      case .inactive, .locked, .sleeping:
+        sessionIsActive = false
+        var effects = safetyExitEffects(emitDiagnostic: true)
+        effects.append(contentsOf: freeModeStatusEffects(changedFrom: previousStatus))
+        return RuntimeResponse(disposition: .passThrough, effects: effects)
       }
     case .eventTapReady:
       let previousStatus = freeModeStatus
@@ -1223,7 +1233,7 @@ public final class MouselessRuntime {
   }
 
   public var freeModeStatus: FreeModeStatus {
-    guard permissions.isReady && eventTapHealthy else { return .unavailable }
+    guard sessionIsActive && permissions.isReady && eventTapHealthy else { return .unavailable }
     return modeEnabled ? .enabled : .available
   }
 
