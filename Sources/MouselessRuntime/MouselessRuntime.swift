@@ -119,11 +119,17 @@ public struct PermissionState: Equatable, Sendable {
 public enum Key: Hashable, Sendable {
   case leftCommand, rightCommand, leftControl, rightControl
   case leftOption, rightOption, leftShift, rightShift, capsLock, function
-  case escape
-  case i, j, k, l
-  case space, r, e, q, w
-  case m, comma, period, slash
-  case a, s, d, f
+  case a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z
+  case digit0, digit1, digit2, digit3, digit4, digit5, digit6, digit7, digit8, digit9
+  case minus, equal, leftBracket, rightBracket, backslash, semicolon, quote, grave
+  case comma, period, slash, space
+  case keypad0, keypad1, keypad2, keypad3, keypad4, keypad5, keypad6, keypad7, keypad8, keypad9
+  case keypadDecimal, keypadMultiply, keypadPlus, keypadClear, keypadDivide, keypadMinus
+  case keypadEquals
+  case isoSection, jisYen, jisUnderscore, jisKeypadComma, jisEisu, jisKana
+  case returnKey, keypadEnter, delete, forwardDelete, tab, escape
+  case arrowUp, arrowDown, arrowLeft, arrowRight, home, end, pageUp, pageDown
+  case functionKey(Int), mediaKey(Int)
   case other(Int)
 
   fileprivate init(configurationName: String) {
@@ -131,30 +137,113 @@ public enum Key: Hashable, Sendable {
     case "leftOption": self = .leftOption
     case "rightOption": self = .rightOption
     case "escape": self = .escape
+    case "a": self = .a
+    case "b": self = .b
+    case "c": self = .c
+    case "d": self = .d
+    case "e": self = .e
+    case "f": self = .f
+    case "g": self = .g
+    case "h": self = .h
     case "i": self = .i
     case "j": self = .j
     case "k": self = .k
     case "l": self = .l
-    case "space": self = .space
-    case "r": self = .r
-    case "e": self = .e
-    case "q": self = .q
-    case "w": self = .w
     case "m": self = .m
+    case "n": self = .n
+    case "o": self = .o
+    case "p": self = .p
+    case "q": self = .q
+    case "r": self = .r
+    case "s": self = .s
+    case "t": self = .t
+    case "u": self = .u
+    case "v": self = .v
+    case "w": self = .w
+    case "x": self = .x
+    case "y": self = .y
+    case "z": self = .z
+    case "digit0": self = .digit0
+    case "digit1": self = .digit1
+    case "digit2": self = .digit2
+    case "digit3": self = .digit3
+    case "digit4": self = .digit4
+    case "digit5": self = .digit5
+    case "digit6": self = .digit6
+    case "digit7": self = .digit7
+    case "digit8": self = .digit8
+    case "digit9": self = .digit9
+    case "0": self = .digit0
+    case "1": self = .digit1
+    case "2": self = .digit2
+    case "3": self = .digit3
+    case "4": self = .digit4
+    case "5": self = .digit5
+    case "6": self = .digit6
+    case "7": self = .digit7
+    case "8": self = .digit8
+    case "9": self = .digit9
+    case "minus": self = .minus
+    case "equal": self = .equal
+    case "leftBracket": self = .leftBracket
+    case "rightBracket": self = .rightBracket
+    case "backslash": self = .backslash
+    case "semicolon": self = .semicolon
+    case "quote": self = .quote
+    case "grave": self = .grave
     case "comma": self = .comma
     case "period": self = .period
     case "slash": self = .slash
-    case "a": self = .a
-    case "s": self = .s
-    case "d": self = .d
-    case "f": self = .f
+    case "space": self = .space
+    case "keypad0": self = .keypad0
+    case "keypad1": self = .keypad1
+    case "keypad2": self = .keypad2
+    case "keypad3": self = .keypad3
+    case "keypad4": self = .keypad4
+    case "keypad5": self = .keypad5
+    case "keypad6": self = .keypad6
+    case "keypad7": self = .keypad7
+    case "keypad8": self = .keypad8
+    case "keypad9": self = .keypad9
+    case "keypadDecimal": self = .keypadDecimal
+    case "keypadMultiply": self = .keypadMultiply
+    case "keypadPlus": self = .keypadPlus
+    case "keypadClear": self = .keypadClear
+    case "keypadDivide": self = .keypadDivide
+    case "keypadMinus": self = .keypadMinus
+    case "keypadEquals": self = .keypadEquals
+    case "isoSection": self = .isoSection
+    case "jisYen": self = .jisYen
+    case "jisUnderscore": self = .jisUnderscore
+    case "jisKeypadComma": self = .jisKeypadComma
+    case "jisEisu": self = .jisEisu
+    case "jisKana": self = .jisKana
     default: self = .other(Int.min)
     }
   }
 
   fileprivate var isValidConfigurationKey: Bool {
-    if case .other = self { return false }
-    return true
+    switch self {
+    case .leftOption, .rightOption, .escape: return true
+    default: return isProtectedCharacter
+    }
+  }
+
+  fileprivate var isProtectedCharacter: Bool {
+    switch self {
+    case .a, .b, .c, .d, .e, .f, .g, .h, .i, .j, .k, .l, .m, .n, .o, .p, .q, .r, .s, .t, .u,
+      .v, .w, .x, .y, .z,
+      .digit0, .digit1, .digit2, .digit3, .digit4, .digit5, .digit6, .digit7, .digit8, .digit9,
+      .minus, .equal, .leftBracket, .rightBracket, .backslash, .semicolon, .quote, .grave,
+      .comma, .period, .slash, .space,
+      .keypad0, .keypad1, .keypad2, .keypad3, .keypad4, .keypad5, .keypad6, .keypad7, .keypad8,
+      .keypad9, .keypadDecimal, .keypadMultiply, .keypadPlus, .keypadDivide,
+      .keypadMinus, .keypadEquals, .isoSection, .jisYen, .jisUnderscore, .jisKeypadComma,
+      .jisEisu, .jisKana:
+      return true
+    default:
+      return false
+    }
   }
 }
 
@@ -982,6 +1071,7 @@ public final class MouselessRuntime {
   private var heldButtons: Set<MouseButton> = []
   private var activationDownAt: TimeInterval?
   private var activationHadCombination = false
+  private var leftOptionSafetyExitHeld = false
   private var movementVelocity = Point(x: 0, y: 0)
   private var scrollVelocity = Point(x: 0, y: 0)
   private var scrollRemainder = Point(x: 0, y: 0)
@@ -1097,6 +1187,7 @@ public final class MouselessRuntime {
         activeModifiers = []
         activationDownAt = nil
         activationHadCombination = false
+        leftOptionSafetyExitHeld = false
         movementVelocity = Point(x: 0, y: 0)
         scrollVelocity = Point(x: 0, y: 0)
         scrollRemainder = Point(x: 0, y: 0)
@@ -1152,7 +1243,20 @@ public final class MouselessRuntime {
     _ key: Key, timestamp: TimeInterval, isAutoRepeat: Bool, modifiers: KeyboardModifiers
   ) -> RuntimeResponse {
     if key == .leftOption, modeEnabled {
-      return RuntimeResponse(disposition: .passThrough, effects: safetyExitEffects())
+      leftOptionSafetyExitHeld = true
+      return RuntimeResponse(
+        disposition: .passThrough,
+        effects: safetyExitEffects(preserveKeyboardDispositions: true))
+    }
+    if leftOptionSafetyExitHeld {
+      if isAutoRepeat, let disposition = keyboardDispositions[key] {
+        return RuntimeResponse(disposition: disposition)
+      }
+      guard !isAutoRepeat else { return RuntimeResponse(disposition: .passThrough) }
+      let disposition: EventDisposition =
+        key.isProtectedCharacter && !modifiers.containsCommandOrControl ? .consume : .passThrough
+      keyboardDispositions[key] = disposition
+      return RuntimeResponse(disposition: disposition)
     }
     if key == configurationKey(named: configuration.bindings.activation) {
       if !isAutoRepeat {
@@ -1167,45 +1271,51 @@ public final class MouselessRuntime {
     if isAutoRepeat, let disposition = keyboardDispositions[key] {
       return RuntimeResponse(disposition: disposition)
     }
+    if isAutoRepeat { return RuntimeResponse(disposition: .passThrough) }
     guard modeEnabled, permissions.isReady else {
-      if !isAutoRepeat { keyboardDispositions[key] = .passThrough }
+      keyboardDispositions[key] = .passThrough
       return RuntimeResponse(disposition: .passThrough)
     }
     if modifiers.containsCommandOrControl {
-      if !isAutoRepeat { keyboardDispositions[key] = .passThrough }
+      keyboardDispositions[key] = .passThrough
       return RuntimeResponse(disposition: .passThrough)
     }
-    if !isAutoRepeat {
-      if key == configurationKey(named: configuration.bindings.moveLeft), movementVelocity.x > 0 {
-        movementVelocity.x = 0
-      }
-      if key == configurationKey(named: configuration.bindings.moveRight), movementVelocity.x < 0 {
-        movementVelocity.x = 0
-      }
-      if key == configurationKey(named: configuration.bindings.moveUp), movementVelocity.y < 0 {
-        movementVelocity.y = 0
-      }
-      if key == configurationKey(named: configuration.bindings.moveDown), movementVelocity.y > 0 {
-        movementVelocity.y = 0
-      }
+    guard key.isProtectedCharacter else {
+      keyboardDispositions[key] = .passThrough
+      return RuntimeResponse(disposition: .passThrough)
+    }
+    if key == configurationKey(named: configuration.bindings.moveLeft), movementVelocity.x > 0 {
+      movementVelocity.x = 0
+    }
+    if key == configurationKey(named: configuration.bindings.moveRight), movementVelocity.x < 0 {
+      movementVelocity.x = 0
+    }
+    if key == configurationKey(named: configuration.bindings.moveUp), movementVelocity.y < 0 {
+      movementVelocity.y = 0
+    }
+    if key == configurationKey(named: configuration.bindings.moveDown), movementVelocity.y > 0 {
+      movementVelocity.y = 0
     }
     guard let button = button(for: key) else {
-      let disposition: EventDisposition = isMappedKey(key) ? .consume : .passThrough
-      if !isAutoRepeat {
-        keyboardDispositions[key] = disposition
-        if disposition == .consume { pressedKeys.insert(key) }
-      }
+      let disposition: EventDisposition = .consume
+      keyboardDispositions[key] = disposition
+      if isMappedKey(key) { pressedKeys.insert(key) }
       return RuntimeResponse(disposition: disposition)
     }
-    if !isAutoRepeat, heldButtons.insert(button).inserted {
+    if heldButtons.insert(button).inserted {
       keyboardDispositions[key] = .consume
       return RuntimeResponse(disposition: .consume, effects: [.mouseButton(button, .down)])
     }
-    if !isAutoRepeat { keyboardDispositions[key] = .consume }
+    keyboardDispositions[key] = .consume
     return RuntimeResponse(disposition: .consume)
   }
 
   private func keyUp(_ key: Key, timestamp: TimeInterval) -> RuntimeResponse {
+    if key == .leftOption, leftOptionSafetyExitHeld {
+      leftOptionSafetyExitHeld = false
+      keyboardDispositions.removeValue(forKey: key)
+      return RuntimeResponse(disposition: .passThrough)
+    }
     if key == configurationKey(named: configuration.bindings.activation) {
       defer {
         activationDownAt = nil
@@ -1232,9 +1342,10 @@ public final class MouselessRuntime {
     guard permissions.isReady else {
       return RuntimeResponse(disposition: .passThrough)
     }
-    guard keyboardDispositions.removeValue(forKey: key) == .consume else {
+    guard let disposition = keyboardDispositions.removeValue(forKey: key) else {
       return RuntimeResponse(disposition: .passThrough)
     }
+    guard disposition == .consume else { return RuntimeResponse(disposition: .passThrough) }
     if let button = button(for: key), heldButtons.remove(button) != nil {
       pressedKeys.remove(key)
       return RuntimeResponse(disposition: .consume, effects: [.mouseButton(button, .up)])
@@ -1279,17 +1390,20 @@ public final class MouselessRuntime {
     return RuntimeResponse(disposition: .passThrough, effects: effects)
   }
 
-  private func safetyExitEffects(emitDiagnostic: Bool = false) -> [RuntimeEffect] {
+  private func safetyExitEffects(
+    emitDiagnostic: Bool = false, preserveKeyboardDispositions: Bool = false
+  ) -> [RuntimeEffect] {
     let previousStatus = freeModeStatus
     var effects = heldButtons.sorted { $0.rawValue < $1.rawValue }.map {
       RuntimeEffect.mouseButton($0, .up)
     }
     heldButtons.removeAll()
     pressedKeys.removeAll()
-    keyboardDispositions.removeAll()
+    if !preserveKeyboardDispositions { keyboardDispositions.removeAll() }
     activeModifiers = []
     activationDownAt = nil
     activationHadCombination = false
+    if !preserveKeyboardDispositions { leftOptionSafetyExitHeld = false }
     movementVelocity = Point(x: 0, y: 0)
     scrollVelocity = Point(x: 0, y: 0)
     scrollRemainder = Point(x: 0, y: 0)

@@ -56,6 +56,9 @@ Record a check only after observing the result in the real app:
 - [ ] Accessibility, Listen Event, and Post Event can be granted from the requested flow; incomplete permissions pass keys through and cannot enter free mode.
 - [ ] Rebuilding with the fixed identity preserves the existing TCC grant.
 - [ ] Left Option enters and exits free mode as the fixed safety exit; Escape's down, repeat, and up events pass through; ordinary application switching leaves free mode unchanged.
+- [ ] In free mode, every ANSI letter, number, punctuation key, Space, keypad number/operator/decimal key, and available ISO/JIS character key is consumed without text leakage when unmapped; mapped keys still perform their Mouseless action.
+- [ ] Return, keypad Enter, Delete, Forward Delete, Tab, Escape, arrows, Home, End, Page Up/Down, function keys, and media keys pass through; Shift, Caps Lock, right Option, and Fn do not bypass character protection.
+- [ ] Command/Control shortcuts pass through completely, and a key's down/repeat/up decision remains paired across entry, Left Option exit, Left Option release, permission loss, lock, sleep, and event-tap recovery.
 - [ ] Immediately after entering free mode, the blue indicator is at the current pointer location within one display refresh; I/J/K/L move up/left/down/right, including diagonals and opposing directions.
 - [ ] A precision key, each fast key, and stacked fast keys produce the expected ordered speeds; at both 60 Hz and 120 Hz, equal movement and scroll hold times produce approximately equal distances.
 - [ ] Movement crosses a reachable multi-display boundary and respects non-standard/negative display coordinates and display gaps.

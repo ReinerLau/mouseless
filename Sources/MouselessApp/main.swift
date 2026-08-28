@@ -772,23 +772,110 @@ private final class MouselessApplicationController: NSObject {
     case CGKeyCode(kVK_CapsLock): return .capsLock
     case CGKeyCode(kVK_Function): return .function
     case CGKeyCode(kVK_Escape): return .escape
+    case CGKeyCode(kVK_Return): return .returnKey
+    case CGKeyCode(kVK_Tab): return .tab
+    case CGKeyCode(kVK_Delete): return .delete
+    case CGKeyCode(kVK_ForwardDelete): return .forwardDelete
+    case CGKeyCode(kVK_Home): return .home
+    case CGKeyCode(kVK_End): return .end
+    case CGKeyCode(kVK_PageUp): return .pageUp
+    case CGKeyCode(kVK_PageDown): return .pageDown
+    case CGKeyCode(kVK_LeftArrow): return .arrowLeft
+    case CGKeyCode(kVK_RightArrow): return .arrowRight
+    case CGKeyCode(kVK_UpArrow): return .arrowUp
+    case CGKeyCode(kVK_DownArrow): return .arrowDown
+    case CGKeyCode(kVK_F1): return .functionKey(1)
+    case CGKeyCode(kVK_F2): return .functionKey(2)
+    case CGKeyCode(kVK_F3): return .functionKey(3)
+    case CGKeyCode(kVK_F4): return .functionKey(4)
+    case CGKeyCode(kVK_F5): return .functionKey(5)
+    case CGKeyCode(kVK_F6): return .functionKey(6)
+    case CGKeyCode(kVK_F7): return .functionKey(7)
+    case CGKeyCode(kVK_F8): return .functionKey(8)
+    case CGKeyCode(kVK_F9): return .functionKey(9)
+    case CGKeyCode(kVK_F10): return .functionKey(10)
+    case CGKeyCode(kVK_F11): return .functionKey(11)
+    case CGKeyCode(kVK_F12): return .functionKey(12)
+    case CGKeyCode(kVK_F13): return .functionKey(13)
+    case CGKeyCode(kVK_F14): return .functionKey(14)
+    case CGKeyCode(kVK_F15): return .functionKey(15)
+    case CGKeyCode(kVK_F16): return .functionKey(16)
+    case CGKeyCode(kVK_F17): return .functionKey(17)
+    case CGKeyCode(kVK_F18): return .functionKey(18)
+    case CGKeyCode(kVK_F19): return .functionKey(19)
+    case CGKeyCode(kVK_F20): return .functionKey(20)
+    case CGKeyCode(kVK_ANSI_A): return .a
+    case CGKeyCode(kVK_ANSI_B): return .b
+    case CGKeyCode(kVK_ANSI_C): return .c
+    case CGKeyCode(kVK_ANSI_D): return .d
+    case CGKeyCode(kVK_ANSI_E): return .e
+    case CGKeyCode(kVK_ANSI_F): return .f
+    case CGKeyCode(kVK_ANSI_G): return .g
+    case CGKeyCode(kVK_ANSI_H): return .h
     case CGKeyCode(kVK_ANSI_I): return .i
     case CGKeyCode(kVK_ANSI_J): return .j
     case CGKeyCode(kVK_ANSI_K): return .k
     case CGKeyCode(kVK_ANSI_L): return .l
-    case CGKeyCode(kVK_Space): return .space
-    case CGKeyCode(kVK_ANSI_R): return .r
-    case CGKeyCode(kVK_ANSI_E): return .e
-    case CGKeyCode(kVK_ANSI_Q): return .q
-    case CGKeyCode(kVK_ANSI_W): return .w
     case CGKeyCode(kVK_ANSI_M): return .m
+    case CGKeyCode(kVK_ANSI_N): return .n
+    case CGKeyCode(kVK_ANSI_O): return .o
+    case CGKeyCode(kVK_ANSI_P): return .p
+    case CGKeyCode(kVK_ANSI_Q): return .q
+    case CGKeyCode(kVK_ANSI_R): return .r
+    case CGKeyCode(kVK_ANSI_S): return .s
+    case CGKeyCode(kVK_ANSI_T): return .t
+    case CGKeyCode(kVK_ANSI_U): return .u
+    case CGKeyCode(kVK_ANSI_V): return .v
+    case CGKeyCode(kVK_ANSI_W): return .w
+    case CGKeyCode(kVK_ANSI_X): return .x
+    case CGKeyCode(kVK_ANSI_Y): return .y
+    case CGKeyCode(kVK_ANSI_Z): return .z
+    case CGKeyCode(kVK_ANSI_0): return .digit0
+    case CGKeyCode(kVK_ANSI_1): return .digit1
+    case CGKeyCode(kVK_ANSI_2): return .digit2
+    case CGKeyCode(kVK_ANSI_3): return .digit3
+    case CGKeyCode(kVK_ANSI_4): return .digit4
+    case CGKeyCode(kVK_ANSI_5): return .digit5
+    case CGKeyCode(kVK_ANSI_6): return .digit6
+    case CGKeyCode(kVK_ANSI_7): return .digit7
+    case CGKeyCode(kVK_ANSI_8): return .digit8
+    case CGKeyCode(kVK_ANSI_9): return .digit9
+    case CGKeyCode(kVK_ANSI_Minus): return .minus
+    case CGKeyCode(kVK_ANSI_Equal): return .equal
+    case CGKeyCode(kVK_ANSI_LeftBracket): return .leftBracket
+    case CGKeyCode(kVK_ANSI_RightBracket): return .rightBracket
+    case CGKeyCode(kVK_ANSI_Backslash): return .backslash
+    case CGKeyCode(kVK_ANSI_Semicolon): return .semicolon
+    case CGKeyCode(kVK_ANSI_Quote): return .quote
+    case CGKeyCode(kVK_ANSI_Grave): return .grave
     case CGKeyCode(kVK_ANSI_Comma): return .comma
     case CGKeyCode(kVK_ANSI_Period): return .period
     case CGKeyCode(kVK_ANSI_Slash): return .slash
-    case CGKeyCode(kVK_ANSI_A): return .a
-    case CGKeyCode(kVK_ANSI_S): return .s
-    case CGKeyCode(kVK_ANSI_D): return .d
-    case CGKeyCode(kVK_ANSI_F): return .f
+    case CGKeyCode(kVK_Space): return .space
+    case CGKeyCode(kVK_ANSI_Keypad0): return .keypad0
+    case CGKeyCode(kVK_ANSI_Keypad1): return .keypad1
+    case CGKeyCode(kVK_ANSI_Keypad2): return .keypad2
+    case CGKeyCode(kVK_ANSI_Keypad3): return .keypad3
+    case CGKeyCode(kVK_ANSI_Keypad4): return .keypad4
+    case CGKeyCode(kVK_ANSI_Keypad5): return .keypad5
+    case CGKeyCode(kVK_ANSI_Keypad6): return .keypad6
+    case CGKeyCode(kVK_ANSI_Keypad7): return .keypad7
+    case CGKeyCode(kVK_ANSI_Keypad8): return .keypad8
+    case CGKeyCode(kVK_ANSI_Keypad9): return .keypad9
+    case CGKeyCode(kVK_ANSI_KeypadDecimal): return .keypadDecimal
+    case CGKeyCode(kVK_ANSI_KeypadMultiply): return .keypadMultiply
+    case CGKeyCode(kVK_ANSI_KeypadPlus): return .keypadPlus
+    case CGKeyCode(kVK_ANSI_KeypadClear): return .keypadClear
+    case CGKeyCode(kVK_ANSI_KeypadDivide): return .keypadDivide
+    case CGKeyCode(kVK_ANSI_KeypadEnter): return .keypadEnter
+    case CGKeyCode(kVK_ANSI_KeypadMinus): return .keypadMinus
+    case CGKeyCode(kVK_ANSI_KeypadEquals): return .keypadEquals
+    case CGKeyCode(kVK_ISO_Section): return .isoSection
+    case CGKeyCode(kVK_JIS_Yen): return .jisYen
+    case CGKeyCode(kVK_JIS_Underscore): return .jisUnderscore
+    case CGKeyCode(kVK_JIS_KeypadComma): return .jisKeypadComma
+    case CGKeyCode(kVK_JIS_Eisu): return .jisEisu
+    case CGKeyCode(kVK_JIS_Kana): return .jisKana
     default: return .other(Int(code))
     }
   }
