@@ -356,6 +356,104 @@ private final class IndicatorController {
   }
 }
 
+private final class BindingReferencePanelController {
+  private let panel: NSPanel
+
+  init(reference: BindingReference) {
+    panel = NSPanel(
+      contentRect: .zero, styleMask: [.titled, .closable, .utilityWindow], backing: .buffered,
+      defer: false)
+    panel.title = "Key Bindings"
+    panel.level = .floating
+    panel.isFloatingPanel = true
+    panel.hidesOnDeactivate = false
+    panel.isReleasedWhenClosed = false
+    panel.animationBehavior = .utilityWindow
+    panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+    panel.contentView = contentView(for: reference)
+    panel.setContentSize(NSSize(width: 600, height: 522))
+    panel.setFrameAutosaveName("KeyBindingsPanel")
+    if !panel.setFrameUsingName("KeyBindingsPanel") { panel.center() }
+  }
+
+  var isVisible: Bool { panel.isVisible }
+
+  func show() {
+    NSApp.activate(ignoringOtherApps: true)
+    panel.makeKeyAndOrderFront(nil)
+  }
+
+  func close() { panel.close() }
+
+  private func contentView(for reference: BindingReference) -> NSView {
+    let content = NSView()
+    let groups = reference.sections.map(sectionView)
+      + [sectionView(BindingReferenceSection(title: "Safety Exit", items: [reference.safetyExit]))]
+    let stack = NSStackView(views: groups)
+    stack.orientation = .vertical
+    stack.alignment = .leading
+    stack.distribution = .fill
+    stack.spacing = 12
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    content.addSubview(stack)
+    NSLayoutConstraint.activate([
+      stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
+      stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
+      stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 18),
+      stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -18),
+    ])
+    return content
+  }
+
+  private func sectionView(_ section: BindingReferenceSection) -> NSView {
+    let title = NSTextField(labelWithString: section.title)
+    title.font = .systemFont(ofSize: 12, weight: .semibold)
+    title.textColor = .secondaryLabelColor
+
+    let cards = NSStackView(views: section.items.map(cardView))
+    cards.orientation = .horizontal
+    cards.alignment = .top
+    cards.distribution = .fill
+    cards.spacing = 10
+
+    let sectionStack = NSStackView(views: [title, cards])
+    sectionStack.orientation = .vertical
+    sectionStack.alignment = .leading
+    sectionStack.spacing = 4
+    return sectionStack
+  }
+
+  private func cardView(_ item: BindingReferenceItem) -> NSView {
+    let key = NSTextField(labelWithString: item.key)
+    key.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
+    key.alignment = .center
+    key.lineBreakMode = .byTruncatingTail
+    key.wantsLayer = true
+    key.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+    key.layer?.cornerRadius = 5
+
+    let action = NSTextField(labelWithString: item.action)
+    action.font = .systemFont(ofSize: 11)
+    action.textColor = .secondaryLabelColor
+    action.alignment = .center
+    action.lineBreakMode = .byTruncatingTail
+
+    let stack = NSStackView(views: [key, action])
+    stack.orientation = .vertical
+    stack.alignment = .centerX
+    stack.spacing = 4
+    stack.setAccessibilityElement(true)
+    stack.setAccessibilityRole(.group)
+    stack.setAccessibilityLabel("\(item.key), \(item.action)")
+    NSLayoutConstraint.activate([
+      stack.widthAnchor.constraint(equalToConstant: 104),
+      key.widthAnchor.constraint(equalTo: stack.widthAnchor),
+      key.heightAnchor.constraint(equalToConstant: 26),
+    ])
+    return stack
+  }
+}
+
 private final class KeyveerApplicationController: NSObject {
   private let permissions = SystemPermissionProvider()
   private let executor = CoreGraphicsEffectExecutor()
@@ -367,6 +465,7 @@ private final class KeyveerApplicationController: NSObject {
   private let eventTapLock = NSLock()
   private var displayLink: CADisplayLink?
   private var statusItem: NSStatusItem?
+  private var bindingReferencePanel: BindingReferencePanelController?
   private var reloadMenuItem: NSMenuItem?
   private var configurationValid = true
   private var configurationError: String?
@@ -419,6 +518,8 @@ private final class KeyveerApplicationController: NSObject {
     logger.notice("Application stopping")
     displayLink?.invalidate()
     displayLink = nil
+    bindingReferencePanel?.close()
+    bindingReferencePanel = nil
     takeEventTap()?.stop()
     for observer in workspaceObservers {
       NSWorkspace.shared.notificationCenter.removeObserver(observer)
@@ -440,6 +541,8 @@ private final class KeyveerApplicationController: NSObject {
     item.button?.imageScaling = .scaleNone
     updateStatus(runtime.freeModeStatus)
     let menu = NSMenu()
+    menu.addItem(menuItem("Help", #selector(showHelp)))
+    menu.addItem(.separator())
     menu.addItem(menuItem("Request Permissions", #selector(requestPermissions)))
     menu.addItem(menuItem("Open System Settings", #selector(openSystemSettings)))
     menu.addItem(menuItem("Recheck Permissions", #selector(recheckPermissions)))
@@ -726,6 +829,15 @@ private final class KeyveerApplicationController: NSObject {
       present: { [weak self] feedback in self?.presentPermissionFeedback(feedback) })
     coordinator.run()
   }
+  @objc private func showHelp() {
+    if let bindingReferencePanel, bindingReferencePanel.isVisible {
+      bindingReferencePanel.show()
+      return
+    }
+    let panel = BindingReferencePanelController(reference: currentBindingReference())
+    bindingReferencePanel = panel
+    panel.show()
+  }
   @objc private func recheckPermissions() { checkPermissions(prompt: false) }
   @objc private func reloadConfigurationFromMenu() { reloadConfiguration(createIfMissing: false) }
 
@@ -760,6 +872,12 @@ private final class KeyveerApplicationController: NSObject {
   private func configurationURL() -> URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("Keyveer", isDirectory: true).appendingPathComponent("config.json")
+  }
+
+  private func currentBindingReference() -> BindingReference {
+    runtimeLock.lock()
+    defer { runtimeLock.unlock() }
+    return runtime.bindingReference
   }
 
   @objc private func openSystemSettings() {

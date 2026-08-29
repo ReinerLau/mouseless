@@ -25,7 +25,7 @@ Run the deterministic runtime suite with:
 swift test
 ```
 
-On first launch, use Request Permissions and grant Accessibility access. The menu offers Recheck Permissions, Open System Settings, Reload Configuration, diagnostics, and Quit.
+On first launch, use Request Permissions and grant Accessibility access. The menu offers Help for the current key bindings, Recheck Permissions, Open System Settings, Reload Configuration, diagnostics, and Quit.
 
 Copy Diagnostic Summary copies only version/build identity, capability state, configuration and event-tap
 status, plus aggregate callback, frame, recovery and effect counters. It does not include input,

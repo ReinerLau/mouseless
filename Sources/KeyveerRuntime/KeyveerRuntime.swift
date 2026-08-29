@@ -1006,6 +1006,88 @@ public struct RuntimeConfiguration: Codable, Equatable, Sendable {
   }
 }
 
+public struct BindingReferenceItem: Equatable, Sendable {
+  public let key: String
+  public let action: String
+
+  public init(key: String, action: String) {
+    self.key = key
+    self.action = action
+  }
+}
+
+public struct BindingReferenceSection: Equatable, Sendable {
+  public let title: String
+  public let items: [BindingReferenceItem]
+
+  public init(title: String, items: [BindingReferenceItem]) {
+    self.title = title
+    self.items = items
+  }
+}
+
+public struct BindingReference: Equatable, Sendable {
+  public let sections: [BindingReferenceSection]
+  public let safetyExit: BindingReferenceItem
+
+  public init(bindings: KeyBindings) {
+    func item(_ key: String, _ action: String) -> BindingReferenceItem {
+      BindingReferenceItem(key: bindingKeyLabel(key), action: action)
+    }
+
+    sections = [
+      BindingReferenceSection(
+        title: "Activation", items: [item(bindings.activation, "Tap to Enter")]),
+      BindingReferenceSection(
+        title: "Movement",
+        items: [
+          item(bindings.moveUp, "Up"), item(bindings.moveLeft, "Left"),
+          item(bindings.moveDown, "Down"), item(bindings.moveRight, "Right"),
+        ]),
+      BindingReferenceSection(
+        title: "Mouse Buttons",
+        items: [
+          item(bindings.leftClick, "Left Click"), item(bindings.rightClick, "Right Click"),
+          item(bindings.middleClick, "Middle Click"), item(bindings.backClick, "Back"),
+          item(bindings.forwardClick, "Forward"),
+        ]),
+      BindingReferenceSection(
+        title: "Scrolling",
+        items: [
+          item(bindings.scrollUp, "Up"), item(bindings.scrollDown, "Down"),
+          item(bindings.scrollLeft, "Left"), item(bindings.scrollRight, "Right"),
+        ]),
+      BindingReferenceSection(
+        title: "Speed",
+        items: [
+          item(bindings.precision, "Precision"), item(bindings.speedOne, "Fast 1"),
+          item(bindings.speedTwo, "Fast 2"), item(bindings.speedThree, "Fast 3"),
+        ]),
+    ]
+    safetyExit = BindingReferenceItem(key: "Left Option", action: "Exit Free Mode")
+  }
+}
+
+private func bindingKeyLabel(_ name: String) -> String {
+  let labels = [
+    "leftOption": "Left Option", "rightOption": "Right Option", "space": "Space",
+    "minus": "−", "equal": "=", "leftBracket": "[", "rightBracket": "]",
+    "backslash": "\\", "semicolon": ";", "quote": "'", "grave": "`", "comma": ",",
+    "period": ".", "slash": "/", "keypadDecimal": "Keypad .",
+    "keypadMultiply": "Keypad ×", "keypadPlus": "Keypad +", "keypadDivide": "Keypad ÷",
+    "keypadMinus": "Keypad −", "keypadEquals": "Keypad =", "isoSection": "§",
+    "jisYen": "¥", "jisUnderscore": "JIS _", "jisKeypadComma": "Keypad ,",
+    "jisEisu": "英数", "jisKana": "かな",
+  ]
+  if let label = labels[name] { return label }
+  if name.hasPrefix("keypad"), let number = name.last, number.isNumber {
+    return "Keypad \(number)"
+  }
+  if name.hasPrefix("digit"), let number = name.last, number.isNumber { return String(number) }
+  if name.count == 1 { return name.uppercased() }
+  return name
+}
+
 public enum ConfigurationError: Error, Equatable, Sendable, LocalizedError {
   case invalidJSON
   case unknownFields([String])
@@ -1268,6 +1350,10 @@ public final class KeyveerRuntime {
   public var freeModeStatus: FreeModeStatus {
     guard sessionIsActive && permissions.isReady && eventTapHealthy else { return .unavailable }
     return modeEnabled ? .enabled : .available
+  }
+
+  public var bindingReference: BindingReference {
+    BindingReference(bindings: configuration.bindings)
   }
 
   private func keyboard(_ event: KeyboardEvent) -> RuntimeResponse {

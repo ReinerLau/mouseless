@@ -54,6 +54,7 @@ Record a check only after observing the result in the real app:
 
 - [ ] First launch creates the default configuration and the permission menu clearly reports each missing capability.
 - [ ] Accessibility, Listen Event, and Post Event can be granted from the requested flow; incomplete permissions pass keys through and cannot enter free mode.
+- [ ] Help is the first menu item and opens a floating Key Bindings panel containing grouped current bindings plus the fixed Left Option safety exit; an open panel remains unchanged after configuration reload, while closing and reopening it shows the latest accepted bindings.
 - [ ] Rebuilding with the fixed identity preserves the existing TCC grant.
 - [ ] Left Option enters and exits free mode as the fixed safety exit; Escape's down, repeat, and up events pass through; ordinary application switching leaves free mode unchanged.
 - [ ] In free mode, every ANSI letter, number, punctuation key, Space, keypad number/operator/decimal key, and available ISO/JIS character key is consumed without text leakage when unmapped; mapped keys still perform their Keyveer action.

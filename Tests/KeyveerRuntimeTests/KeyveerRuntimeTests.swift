@@ -1261,6 +1261,48 @@ final class KeyveerRuntimeTests: XCTestCase {
     XCTAssertNil(bindings["escape"])
   }
 
+  func testBindingReferenceGroupsAndLabelsEveryDefaultBinding() {
+    let reference = KeyveerRuntime().bindingReference
+
+    XCTAssertEqual(
+      reference.sections.map(\.title),
+      ["Activation", "Movement", "Mouse Buttons", "Scrolling", "Speed"])
+    XCTAssertEqual(reference.sections.map(\.items.count), [1, 4, 5, 4, 4])
+    XCTAssertEqual(
+      reference.sections[0].items,
+      [BindingReferenceItem(key: "Left Option", action: "Tap to Enter")])
+    XCTAssertEqual(
+      reference.sections[1].items,
+      [
+        BindingReferenceItem(key: "I", action: "Up"),
+        BindingReferenceItem(key: "J", action: "Left"),
+        BindingReferenceItem(key: "K", action: "Down"),
+        BindingReferenceItem(key: "L", action: "Right"),
+      ])
+    XCTAssertEqual(reference.safetyExit, BindingReferenceItem(key: "Left Option", action: "Exit Free Mode"))
+  }
+
+  func testBindingReferenceUsesLastAcceptedConfigurationAndFriendlyKeyLabels() throws {
+    let runtime = KeyveerRuntime()
+    var object = try configurationObject()
+    var bindings = try XCTUnwrap(object["bindings"] as? [String: Any])
+    bindings["activation"] = "rightOption"
+    bindings["moveUp"] = "keypad8"
+    bindings["moveDown"] = "keypad2"
+    object["bindings"] = bindings
+
+    XCTAssertTrue(
+      runtime.handle(.configuration(try JSONSerialization.data(withJSONObject: object))).effects
+        .contains(.configurationAccepted))
+    let accepted = runtime.bindingReference
+    XCTAssertEqual(accepted.sections[0].items[0].key, "Right Option")
+    XCTAssertEqual(accepted.sections[1].items[0].key, "Keypad 8")
+
+    object["unexpected"] = true
+    _ = runtime.handle(.configuration(try JSONSerialization.data(withJSONObject: object)))
+    XCTAssertEqual(runtime.bindingReference, accepted)
+  }
+
   func testSchemaV2AcceptsOnlyLeftOrRightOptionAsActivation() throws {
     for activation in ["leftOption", "rightOption"] {
       var object = try configurationObject()
