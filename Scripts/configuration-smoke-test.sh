@@ -2,8 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-APP_PATH="${1:-$SCRIPT_DIR/../build/Build/Products/Release/Mouseless.app}"
-BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/mouseless-config-smoke.XXXXXX")
+APP_PATH="${1:-$SCRIPT_DIR/../build/Build/Products/Release/Keyveer.app}"
+BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/keyveer-config-smoke.XXXXXX")
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
 [[ -d "$APP_PATH" ]] || {

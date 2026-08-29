@@ -9,6 +9,8 @@ private let qKey: CGKeyCode = 12
 private let wKey: CGKeyCode = 13
 private let lKey: CGKeyCode = 37
 private let eventSource = CGEventSource(stateID: .combinedSessionState)
+private let doubleClickGap =
+  Double(ProcessInfo.processInfo.environment["KEYVEER_DOUBLE_CLICK_GAP"] ?? "0.05") ?? 0.05
 
 private enum SmokeButton: Int, CaseIterable {
   case left = 0
@@ -21,6 +23,7 @@ private enum SmokeButton: Int, CaseIterable {
 private struct ObservedMouseEvent {
   let type: CGEventType
   let button: Int
+  let clickState: Int
 }
 
 private struct SmokeBinding {
@@ -74,7 +77,9 @@ private final class MouseEventCapture {
 
   fileprivate func receive(_ type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent> {
     let button = Int(event.getIntegerValueField(.mouseEventButtonNumber))
-    events.append(ObservedMouseEvent(type: type, button: button))
+    let clickState = Int(event.getIntegerValueField(.mouseEventClickState))
+    events.append(
+      ObservedMouseEvent(type: type, button: button, clickState: clickState))
     return Unmanaged.passUnretained(event)
   }
 }
@@ -132,6 +137,13 @@ private func draggedEventType(for button: SmokeButton) -> CGEventType {
   }
 }
 
+private func hasDoubleClick(_ events: [ObservedMouseEvent]) -> Bool {
+  let leftEvents = events.filter { $0.button == SmokeButton.left.rawValue }
+  guard leftEvents.count == 4 else { return false }
+  return leftEvents.map(\.type) == [.leftMouseDown, .leftMouseUp, .leftMouseDown, .leftMouseUp]
+    && leftEvents.map(\.clickState) == [1, 1, 2, 2]
+}
+
 func run() -> Int32 {
   let capture = MouseEventCapture()
   guard capture.start() else {
@@ -144,6 +156,25 @@ func run() -> Int32 {
   Thread.sleep(forTimeInterval: 0.1)
   tapOption()
   capture.pump(for: 0.1)
+
+  capture.clear()
+  for _ in 0..<2 {
+    postKey(spaceKey, isDown: true)
+    capture.pump(for: doubleClickGap)
+    postKey(spaceKey, isDown: false)
+    capture.pump(for: doubleClickGap)
+  }
+  guard hasDoubleClick(capture.events) else {
+    let observed = capture.events.map {
+      "\($0.type.rawValue)/\($0.button)/\($0.clickState)"
+    }
+      .joined(separator: ",")
+    fputs("Observed double-click events: [\(observed)]\n", stderr)
+    fputs("FAIL: two space presses did not produce a system-recognizable double click.\n", stderr)
+    tapOption()
+    return 1
+  }
+  print("PASS: two space presses produced a system-recognizable double click.")
 
   let buttons: [SmokeBinding] = [
     SmokeBinding(name: "left", key: spaceKey, button: .left),

@@ -16,7 +16,7 @@ This repository uses the single-context layout. See `docs/agents/domain.md`.
 
 When a change affects the runtime or macOS app behavior, completion requires
 running `./Scripts/build-and-run.sh` after tests. The script must stop the
-running Mouseless process, build the Release app, launch that built app, and
+running Keyveer process, build the Release app, launch that built app, and
 leave the process-path and launch-time verification in the completion report.
 `swift build` and `swift test` verify source behavior but do not replace this
 app verification step.

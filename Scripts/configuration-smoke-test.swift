@@ -8,7 +8,7 @@ private let rightMovementKey: CGKeyCode = 37
 private let fileManager = FileManager.default
 private let applicationSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
 private let configurationURL = applicationSupport
-  .appendingPathComponent("Mouseless", isDirectory: true)
+  .appendingPathComponent("Keyveer", isDirectory: true)
   .appendingPathComponent("config.json")
 
 private func ask(_ message: String) -> Bool {
@@ -27,7 +27,7 @@ private func waitForConfiguration() -> Bool {
 private func readObject() throws -> [String: Any] {
   let data = try Data(contentsOf: configurationURL)
   guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-    throw NSError(domain: "MouselessConfigurationSmoke", code: 1, userInfo: [
+    throw NSError(domain: "KeyveerConfigurationSmoke", code: 1, userInfo: [
       NSLocalizedDescriptionKey: "configuration root is not a JSON object"
     ])
   }
@@ -88,13 +88,13 @@ private func verifyReloadedMovementSpeed() -> Bool {
 }
 
 func run() -> Int32 {
-  guard ask("Quit Mouseless first, then continue to test first-launch generation.") else {
+  guard ask("Quit Keyveer first, then continue to test first-launch generation.") else {
     print("Aborted.")
     return 1
   }
 
   let backupURL = fileManager.temporaryDirectory
-    .appendingPathComponent("mouseless-config-smoke-\(UUID().uuidString).json")
+    .appendingPathComponent("keyveer-config-smoke-\(UUID().uuidString).json")
   let hadOriginal = fileManager.fileExists(atPath: configurationURL.path)
   do {
     if hadOriginal { try fileManager.moveItem(at: configurationURL, to: backupURL) }
@@ -115,11 +115,11 @@ func run() -> Int32 {
     try launch.run()
     launch.waitUntilExit()
     guard launch.terminationStatus == 0 else {
-      print("FAIL: could not launch Mouseless.")
+      print("FAIL: could not launch Keyveer.")
       return 1
     }
     guard waitForConfiguration() else {
-      print("FAIL: Mouseless did not generate its Application Support configuration.")
+      print("FAIL: Keyveer did not generate its Application Support configuration.")
       return 1
     }
     let generated = try readObject()
@@ -135,7 +135,7 @@ func run() -> Int32 {
     movement["baseSpeed"] = 600.0
     valid["movement"] = movement
     try writeObject(valid)
-    guard ask("Select Mouseless > Reload Configuration, then confirm it shows no error and the app remains usable.") else {
+    guard ask("Select Keyveer > Reload Configuration, then confirm it shows no error and the app remains usable.") else {
       print("FAIL: valid configuration reload was not confirmed.")
       return 1
     }
@@ -150,7 +150,7 @@ func run() -> Int32 {
     }
     guard verifyReloadedMovementSpeed() else { return 1 }
     print("PASS: invalid reload preserved the previous valid behavior.")
-    print("The original configuration was restored. Reload once more, or restart Mouseless, to leave the app on it.")
+    print("The original configuration was restored. Reload once more, or restart Keyveer, to leave the app on it.")
     return 0
   } catch {
     print("FAIL: \(error.localizedDescription)")

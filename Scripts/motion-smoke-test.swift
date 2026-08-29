@@ -103,7 +103,7 @@ private func verifyHorizontalMultiDisplayMotion() -> Bool {
 private func indicatorCenter() -> CGPoint? {
   guard
     let process = NSRunningApplication.runningApplications(
-      withBundleIdentifier: "com.reinerlau.mouseless").first
+      withBundleIdentifier: "com.reinerlau.keyveer").first
   else { return nil }
   let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]]
   return windows?.compactMap { window in

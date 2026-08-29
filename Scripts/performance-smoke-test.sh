@@ -2,12 +2,12 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-APP_PATH="${1:-$SCRIPT_DIR/../build/candidate/Build/Products/Release/Mouseless.app}"
+APP_PATH="${1:-$SCRIPT_DIR/../build/candidate/Build/Products/Release/Keyveer.app}"
 SAMPLE_SECONDS=10
 IDLE_CPU_LIMIT=0.5
 ACTIVE_CPU_LIMIT=3.0
 MEMORY_LIMIT_MB=50.0
-BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/mouseless-performance-smoke.XXXXXX")
+BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/keyveer-performance-smoke.XXXXXX")
 driver_pid=
 cleanup() {
   if [[ -n "$driver_pid" ]]; then
@@ -43,7 +43,7 @@ swiftc "$SCRIPT_DIR/performance-smoke-test.swift" -framework CoreGraphics \
   -o "$BUILD_DIR/performance-smoke-test"
 
 APP_PATH=$(cd "$APP_PATH" && pwd -P)
-APP_EXECUTABLE="$APP_PATH/Contents/MacOS/Mouseless"
+APP_EXECUTABLE="$APP_PATH/Contents/MacOS/Keyveer"
 
 find_pid() {
   while read -r candidate_pid; do
@@ -52,7 +52,7 @@ find_pid() {
       printf '%s\n' "$candidate_pid"
       return 0
     fi
-  done < <(pgrep -x Mouseless || true)
+  done < <(pgrep -x Keyveer || true)
   return 1
 }
 
@@ -63,7 +63,7 @@ fi
 
 open "$APP_PATH"
 sleep 1
-read -r -p "Confirm Mouseless is running, Permissions says Ready, and Free mode is Off [y/N]: " ready
+read -r -p "Confirm Keyveer is running, Permissions says Ready, and Free mode is Off [y/N]: " ready
 case "$ready" in
   y | Y | yes | YES) ;;
   *)
@@ -73,7 +73,7 @@ case "$ready" in
 esac
 
 pid=$(find_pid || true)
-[[ -n "$pid" ]] || { echo "Could not find the Mouseless process." >&2; exit 1; }
+[[ -n "$pid" ]] || { echo "Could not find the Keyveer process." >&2; exit 1; }
 
 sample_process() {
   local output=$1
@@ -83,12 +83,12 @@ sample_process() {
   while (( SECONDS < deadline )); do
     local cpu
     cpu=$(top -l 1 -pid "$pid" -stats pid,cpu | awk -v target="$pid" '$1 == target { print $2; found = 1 } END { exit !found }') || {
-      echo "Mouseless exited while sampling process $pid." >&2
+      echo "Keyveer exited while sampling process $pid." >&2
       return 1
     }
     local rss_kb
     rss_kb=$(ps -p "$pid" -o rss= | awk 'NF == 1 { print $1; found = 1 } END { exit !found }') || {
-      echo "Mouseless exited while sampling process $pid." >&2
+      echo "Keyveer exited while sampling process $pid." >&2
       return 1
     }
     printf '%s %s\n' "$cpu" "$rss_kb" >> "$output"

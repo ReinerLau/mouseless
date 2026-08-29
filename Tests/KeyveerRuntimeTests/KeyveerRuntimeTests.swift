@@ -1,6 +1,6 @@
 import XCTest
 
-@testable import MouselessRuntime
+@testable import KeyveerRuntime
 
 private let buttonBindings: [(Key, MouseButton)] = [
   (.space, .left), (.r, .right), (.e, .middle), (.q, .back), (.w, .forward),
@@ -37,9 +37,34 @@ private let reservedPassThroughKeys: [Key] = [
   .other(999),
 ]
 
-final class MouselessRuntimeTests: XCTestCase {
+final class KeyveerRuntimeTests: XCTestCase {
+  func testPermissionRequestOpensAccessibilityWhenAccessIsDenied() {
+    let denied = PermissionState(accessibility: false, postEvent: false)
+    var appliedState: PermissionState?
+    var presentedFeedback: PermissionRequestFeedback?
+    let coordinator = PermissionRequestCoordinator(
+      request: { denied },
+      apply: { appliedState = $0 },
+      present: { presentedFeedback = $0 })
+
+    coordinator.run()
+
+    XCTAssertEqual(appliedState, denied)
+    XCTAssertEqual(presentedFeedback, .openAccessibilitySettings)
+  }
+
+  func testPermissionRequestConfirmsWhenEveryPermissionIsGranted() {
+    var presentedFeedback: PermissionRequestFeedback?
+    let coordinator = PermissionRequestCoordinator(
+      request: { .allGranted }, apply: { _ in }, present: { presentedFeedback = $0 })
+
+    coordinator.run()
+
+    XCTAssertEqual(presentedFeedback, .allGranted)
+  }
+
   func testStartupPublishesAvailableStatusAfterPermissionsAndEventTapAreReady() {
-    let runtime = MouselessRuntime()
+    let runtime = KeyveerRuntime()
 
     XCTAssertEqual(runtime.freeModeStatus, .unavailable)
     XCTAssertFalse(
@@ -51,17 +76,18 @@ final class MouselessRuntimeTests: XCTestCase {
     XCTAssertTrue(response.effects.contains(.freeModeStatusChanged(.available)))
   }
 
-  func testFreeModeStatusUsesDistinctSymbolsAndAccessibilityDescriptions() {
-    XCTAssertEqual(FreeModeStatus.available.menuBarTitle, "Mouseless ○")
-    XCTAssertEqual(FreeModeStatus.enabled.menuBarTitle, "Mouseless ●")
-    XCTAssertEqual(FreeModeStatus.unavailable.menuBarTitle, "Mouseless !")
+  func testFreeModeStatusUsesDistinctMenuBarSymbolsAndAccessibilityDescriptions() {
+    XCTAssertEqual(FreeModeStatus.available.menuBarSymbolName, "computermouse")
+    XCTAssertEqual(FreeModeStatus.enabled.menuBarSymbolName, "computermouse.fill")
+    XCTAssertEqual(
+      FreeModeStatus.unavailable.menuBarSymbolName, "exclamationmark.triangle.fill")
     XCTAssertTrue(FreeModeStatus.available.accessibilityDescription.contains("off"))
     XCTAssertTrue(FreeModeStatus.enabled.accessibilityDescription.contains("on"))
     XCTAssertTrue(FreeModeStatus.unavailable.accessibilityDescription.contains("unavailable"))
   }
 
   func testEnteringAndLeavingFreeModePublishesAuthoritativeStatus() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
 
     _ = runtime.handle(.keyDown(.leftOption, at: 0))
     let entered = runtime.handle(.keyUp(.leftOption, at: 0.1))
@@ -74,7 +100,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testPermissionRevocationAndRecoveryNeverAutomaticallyReenableFreeMode() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     _ = runtime.handle(.keyDown(.leftOption, at: 0))
     _ = runtime.handle(.keyUp(.leftOption, at: 0.1))
 
@@ -89,7 +115,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testEventTapRecoveryStatesPublishStatusAndRejectActivationWhileUnavailable() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
 
     let disabled = runtime.handle(.eventTapDisabled)
     XCTAssertEqual(runtime.freeModeStatus, .unavailable)
@@ -132,7 +158,7 @@ final class MouselessRuntimeTests: XCTestCase {
     ]
 
     for modifiers in shortcutModifiers {
-      let runtime = MouselessRuntime(permissions: .allGranted)
+      let runtime = KeyveerRuntime(permissions: .allGranted)
       enterFreeMode(runtime)
 
       let down = runtime.handle(
@@ -167,7 +193,7 @@ final class MouselessRuntimeTests: XCTestCase {
     ]
 
     for modifierState in modifiers {
-      let runtime = MouselessRuntime(permissions: .allGranted)
+      let runtime = KeyveerRuntime(permissions: .allGranted)
       enterFreeMode(runtime)
 
       let down = runtime.handle(
@@ -196,7 +222,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testACommandMappedKeyNeverStartsMovementOrAButtonEvenWhenModifiersChangeBeforeRelease() {
-    let runtime = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 100, y: 100))
+    let runtime = KeyveerRuntime(permissions: .allGranted, pointer: Point(x: 100, y: 100))
     enterFreeMode(runtime)
 
     let down = runtime.handle(
@@ -223,7 +249,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testAlwaysOnKeyboardProtectionConsumesCharacterKeysAndPassesReservedKeys() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
 
     for (index, key) in protectedCharacterKeys.enumerated() {
@@ -261,7 +287,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testConfiguredCharacterBindingStillPerformsItsMouseAction() {
-    let runtime = MouselessRuntime(
+    let runtime = KeyveerRuntime(
       configuration: RuntimeConfiguration(
         bindings: KeyBindings(leftClick: "digit1")), permissions: .allGranted)
     enterFreeMode(runtime)
@@ -281,7 +307,7 @@ final class MouselessRuntimeTests: XCTestCase {
     ]
 
     for modifiers in shortcutModifiers {
-      let runtime = MouselessRuntime(permissions: .allGranted)
+      let runtime = KeyveerRuntime(permissions: .allGranted)
       enterFreeMode(runtime)
       let down = runtime.handle(
         .keyboard(
@@ -311,7 +337,7 @@ final class MouselessRuntimeTests: XCTestCase {
     ]
 
     for modifierState in modifiers {
-      let runtime = MouselessRuntime(permissions: .allGranted)
+      let runtime = KeyveerRuntime(permissions: .allGranted)
       enterFreeMode(runtime)
 
       let down = runtime.handle(
@@ -339,7 +365,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testKeyboardDispositionSurvivesEntryNormalExitAndLeftOptionReleaseBoundary() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
 
     let outsideDown = runtime.handle(.keyDown(.digit1, at: 1))
     _ = runtime.handle(.keyDown(.leftOption, at: 1.1))
@@ -376,8 +402,31 @@ final class MouselessRuntimeTests: XCTestCase {
     XCTAssertEqual(runtime.handle(.keyUp(.digit4, at: 2.9)).disposition, .passThrough)
   }
 
+  func testFreeModeCanBeReenteredAfterTypingAndSubmittingWithStaleCapsLockState() {
+    let runtime = KeyveerRuntime(permissions: .allGranted)
+    enterFreeMode(runtime)
+
+    _ = runtime.handle(.keyDown(.leftOption, at: 1, modifiers: [.leftOption]))
+    _ = runtime.handle(.keyUp(.leftOption, at: 1.1))
+
+    _ = runtime.handle(.keyDown(.h, at: 2))
+    _ = runtime.handle(.keyUp(.h, at: 2.1))
+    _ = runtime.handle(.keyDown(.i, at: 2.2))
+    _ = runtime.handle(.keyUp(.i, at: 2.3))
+    _ = runtime.handle(.keyDown(.returnKey, at: 2.4))
+    _ = runtime.handle(.keyUp(.returnKey, at: 2.5))
+
+    _ = runtime.handle(
+      .keyDown(.leftOption, at: 3, modifiers: [.leftOption, .capsLock]))
+    let reentered = runtime.handle(
+      .keyUp(.leftOption, at: 3.1, modifiers: [.capsLock]))
+
+    XCTAssertTrue(reentered.effects.contains(.modeChanged(isEnabled: true)))
+    XCTAssertEqual(runtime.freeModeStatus, .enabled)
+  }
+
   func testFaultBoundaryDropsPendingKeyboardDispositionBeforeRecovery() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
     XCTAssertEqual(runtime.handle(.keyDown(.digit1, at: 1)).disposition, .consume)
 
@@ -392,7 +441,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testFixedSafetyExitReleasesButtonsAndFinishesKeyboardDispositions() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
     XCTAssertEqual(runtime.handle(.keyDown(.l, at: 1)).disposition, .consume)
 
@@ -406,7 +455,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testMissingPermissionPassesThroughKeysAndCannotEnterFreeMode() {
-    let runtime = MouselessRuntime(permissions: .none)
+    let runtime = KeyveerRuntime(permissions: .none)
 
     let down = runtime.handle(.keyDown(.leftOption, at: 0))
     let up = runtime.handle(.keyUp(.leftOption, at: 0.1))
@@ -417,7 +466,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testAQualifiedLeftOptionTapEntersFreeModeWhenCapabilitiesAreReady() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
 
     _ = runtime.handle(.keyDown(.leftOption, at: 0))
     let response = runtime.handle(.keyUp(.leftOption, at: 0.1))
@@ -428,7 +477,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testModifierChangedLeftOptionTapEntersFreeModeWhenCapabilitiesAreReady() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
 
     _ = runtime.handle(.modifierChanged(.leftOption, isPressed: true, at: 0))
     let response = runtime.handle(.modifierChanged(.leftOption, isPressed: false, at: 0.1))
@@ -439,7 +488,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testLeftOptionTimeoutAndCombinationDoNotToggle() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
 
     _ = runtime.handle(.keyDown(.leftOption, at: 0))
     let timeout = runtime.handle(.keyUp(.leftOption, at: 0.251))
@@ -453,7 +502,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testRightOptionEntersWhenConfiguredAsActivationAndLeftOptionIsFixedSafetyExit() {
-    let runtime = MouselessRuntime(
+    let runtime = KeyveerRuntime(
       configuration: RuntimeConfiguration(bindings: KeyBindings(activation: "rightOption")),
       permissions: .allGranted)
 
@@ -469,7 +518,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testConfiguredActivationDoesNotExitFreeModeAndModifiersCancelItsTap() {
-    let runtime = MouselessRuntime(
+    let runtime = KeyveerRuntime(
       configuration: RuntimeConfiguration(bindings: KeyBindings(activation: "rightOption")),
       permissions: .allGranted)
 
@@ -491,7 +540,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testEscapeAlwaysPassesThroughWithoutChangingFreeMode() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
 
     let unmapped = runtime.handle(.keyDown(.other(99), at: 1))
@@ -511,7 +560,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testMovementUsesTimeBasedSpeedAndNormalizesDiagonalInput() {
-    let runtime = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 100, y: 100))
+    let runtime = KeyveerRuntime(permissions: .allGranted, pointer: Point(x: 100, y: 100))
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.i, at: 1))
 
@@ -528,7 +577,7 @@ final class MouselessRuntimeTests: XCTestCase {
 
     XCTAssertEqual(oneAxisDistance, 280, accuracy: 4)
 
-    let diagonal = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 100, y: 100))
+    let diagonal = KeyveerRuntime(permissions: .allGranted, pointer: Point(x: 100, y: 100))
     enterFreeMode(diagonal)
     _ = diagonal.handle(.keyDown(.i, at: 1))
     _ = diagonal.handle(.keyDown(.l, at: 1))
@@ -545,13 +594,13 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testQuartzVerticalBindingsMapIToUpAndKToDown() throws {
-    let up = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 100, y: 100))
+    let up = KeyveerRuntime(permissions: .allGranted, pointer: Point(x: 100, y: 100))
     enterFreeMode(up)
     _ = up.handle(.keyDown(.i, at: 1))
     let upPoint = try XCTUnwrap(pointer(from: up.handle(.frame(deltaTime: 0.2))))
     XCTAssertLessThan(upPoint.y, 100)
 
-    let down = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 100, y: 100))
+    let down = KeyveerRuntime(permissions: .allGranted, pointer: Point(x: 100, y: 100))
     enterFreeMode(down)
     _ = down.handle(.keyDown(.k, at: 1))
     let downPoint = try XCTUnwrap(pointer(from: down.handle(.frame(deltaTime: 0.2))))
@@ -559,7 +608,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testPhysicalPointerMovementProducesAnIndicatorPositionUpdate() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     let response = runtime.handle(.pointerMoved(to: Point(x: 240, y: 180)))
 
     XCTAssertEqual(response.disposition, .passThrough)
@@ -567,7 +616,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testMovementUsesTheEntireLongFrameInterval() {
-    let runtime = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 0, y: 0))
+    let runtime = KeyveerRuntime(permissions: .allGranted, pointer: Point(x: 0, y: 0))
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.l, at: 1))
 
@@ -585,7 +634,7 @@ final class MouselessRuntimeTests: XCTestCase {
     ]
     for precision in [false, true] {
       for fastKeys in fastKeySets {
-        let runtime = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 0, y: 0))
+        let runtime = KeyveerRuntime(permissions: .allGranted, pointer: Point(x: 0, y: 0))
         enterFreeMode(runtime)
         _ = runtime.handle(.keyDown(.l, at: 1))
         if precision { _ = runtime.handle(.keyDown(.a, at: 1.1)) }
@@ -603,7 +652,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testOpposingDirectionsCancelWithoutAffectingTheOtherAxis() {
-    let runtime = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 10, y: 20))
+    let runtime = KeyveerRuntime(permissions: .allGranted, pointer: Point(x: 10, y: 20))
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.i, at: 1))
     _ = runtime.handle(.keyDown(.k, at: 1.1))
@@ -617,7 +666,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testAutoRepeatDoesNotCreateMotionEdgesOrChangeSpeedState() {
-    let repeated = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 0, y: 0))
+    let repeated = KeyveerRuntime(permissions: .allGranted, pointer: Point(x: 0, y: 0))
     enterFreeMode(repeated)
     _ = repeated.handle(.keyDown(.l, at: 1))
     _ = repeated.handle(.keyDown(.s, at: 1))
@@ -626,7 +675,7 @@ final class MouselessRuntimeTests: XCTestCase {
       _ = repeated.handle(.keyDown(.s, at: 1.1, isAutoRepeat: true))
     }
 
-    let ordinary = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 0, y: 0))
+    let ordinary = KeyveerRuntime(permissions: .allGranted, pointer: Point(x: 0, y: 0))
     enterFreeMode(ordinary)
     _ = ordinary.handle(.keyDown(.l, at: 1))
     _ = ordinary.handle(.keyDown(.s, at: 1))
@@ -637,7 +686,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testMovementSmoothingUsesTheConfiguredTimeConstantWhenStartingChangingAndStopping() throws {
-    let runtime = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 0, y: 0))
+    let runtime = KeyveerRuntime(permissions: .allGranted, pointer: Point(x: 0, y: 0))
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.l, at: 1))
 
@@ -670,7 +719,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testMouseButtonsPairEdgesIgnoreAutoRepeatAndReleaseOnExit() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
 
     let down = runtime.handle(.keyDown(.space, at: 1))
@@ -685,7 +734,7 @@ final class MouselessRuntimeTests: XCTestCase {
     let exit = runtime.handle(.keyDown(.leftOption, at: 2.1))
     XCTAssertTrue(exit.effects.contains(.mouseButton(.right, .up)))
 
-    let second = MouselessRuntime(permissions: .allGranted)
+    let second = KeyveerRuntime(permissions: .allGranted)
     enterFreeMode(second)
     _ = second.handle(.keyDown(.space, at: 3))
     let tapExit = second.handle(.keyDown(.leftOption, at: 4))
@@ -696,7 +745,7 @@ final class MouselessRuntimeTests: XCTestCase {
 
   func testAllFiveButtonBindingsProducePairedEdges() {
     for (key, button) in buttonBindings {
-      let runtime = MouselessRuntime(permissions: .allGranted)
+      let runtime = KeyveerRuntime(permissions: .allGranted)
       enterFreeMode(runtime)
 
       let down = runtime.handle(.keyDown(key, at: 1))
@@ -714,7 +763,7 @@ final class MouselessRuntimeTests: XCTestCase {
 
   func testLongPressKeepsEachButtonHeldUntilKeyUp() {
     for (key, button) in buttonBindings {
-      let runtime = MouselessRuntime(permissions: .allGranted)
+      let runtime = KeyveerRuntime(permissions: .allGranted)
       enterFreeMode(runtime)
       XCTAssertEqual(runtime.handle(.keyDown(key, at: 1)).effects, [.mouseButton(button, .down)])
       for frame in 0..<10 {
@@ -728,7 +777,7 @@ final class MouselessRuntimeTests: XCTestCase {
 
   func testButtonBindingsPassThroughOutsideFreeMode() {
     let bindings: [Key] = [.space, .r, .e, .q, .w]
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
 
     for key in bindings {
       XCTAssertEqual(runtime.handle(.keyDown(key, at: 1)).disposition, .passThrough)
@@ -737,7 +786,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testHeldButtonsTurnKeyboardMovementIntoDraggedEvents() throws {
-    let runtime = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 100, y: 100))
+    let runtime = KeyveerRuntime(permissions: .allGranted, pointer: Point(x: 100, y: 100))
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.space, at: 1))
     _ = runtime.handle(.keyDown(.l, at: 1.1))
@@ -758,7 +807,7 @@ final class MouselessRuntimeTests: XCTestCase {
 
   func testEveryHeldButtonProducesItsOwnDraggedEvent() throws {
     for (key, button) in buttonBindings {
-      let runtime = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 100, y: 100))
+      let runtime = KeyveerRuntime(permissions: .allGranted, pointer: Point(x: 100, y: 100))
       enterFreeMode(runtime)
       _ = runtime.handle(.keyDown(key, at: 1))
       _ = runtime.handle(.keyDown(.l, at: 1.1))
@@ -783,7 +832,7 @@ final class MouselessRuntimeTests: XCTestCase {
     }
 
     for sequenceIndex in 0..<128 {
-      let runtime = MouselessRuntime(permissions: .allGranted)
+      let runtime = KeyveerRuntime(permissions: .allGranted)
       enterFreeMode(runtime)
       var effects: [RuntimeEffect] = []
       var pendingConsumedKeys: Set<Key> = []
@@ -829,7 +878,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testButtonReleaseOrderRemainsMappedToEachButton() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
     for (index, binding) in buttonBindings.enumerated() {
       _ = runtime.handle(.keyDown(binding.0, at: Double(index) + 1))
@@ -843,7 +892,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testPermissionLossAndInactiveSessionSafelyReleaseButtons() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.space, at: 1))
     let lostPermission = runtime.handle(.permissionsChanged(.none))
@@ -857,7 +906,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testSleepAndWakeKeepFreeModeOffUntilExplicitlyReenabled() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.space, at: 1))
 
@@ -880,7 +929,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testLockedAndUnlockedSessionKeepsFreeModeOff() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.space, at: 1))
 
@@ -897,7 +946,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testInactiveSessionPublishesUnavailableStatusUntilItBecomesActive() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
 
     let inactive = runtime.handle(.sessionChanged(.inactive))
@@ -911,7 +960,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testSafetyEventsReleaseEveryHeldVirtualButton() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
     for (index, binding) in buttonBindings.enumerated() {
       _ = runtime.handle(.keyDown(binding.0, at: Double(index) + 1))
@@ -924,7 +973,7 @@ final class MouselessRuntimeTests: XCTestCase {
     }
     XCTAssertEqual(released, MouseButton.allCases)
 
-    let shutdownRuntime = MouselessRuntime(permissions: .allGranted)
+    let shutdownRuntime = KeyveerRuntime(permissions: .allGranted)
     enterFreeMode(shutdownRuntime)
     for (index, binding) in buttonBindings.enumerated() {
       _ = shutdownRuntime.handle(.keyDown(binding.0, at: Double(index) + 1))
@@ -947,7 +996,7 @@ final class MouselessRuntimeTests: XCTestCase {
       DisplayRegion(x: 0, y: 0, width: 100, height: 100),
       DisplayRegion(x: 200, y: 0, width: 100, height: 100),
     ])
-    let runtime = MouselessRuntime(
+    let runtime = KeyveerRuntime(
       permissions: .allGranted, topology: topology, pointer: Point(x: 50, y: 50))
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.l, at: 1))
@@ -967,7 +1016,7 @@ final class MouselessRuntimeTests: XCTestCase {
       DisplayRegion(x: 0, y: 0, width: 100, height: 100),
       DisplayRegion(x: 200, y: 0, width: 100, height: 100),
     ])
-    let runtime = MouselessRuntime(
+    let runtime = KeyveerRuntime(
       permissions: .allGranted, topology: topology, pointer: Point(x: 50, y: 50))
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.l, at: 1))
@@ -989,7 +1038,7 @@ final class MouselessRuntimeTests: XCTestCase {
     let topology = DisplayTopology(regions: [
       DisplayRegion(x: 0, y: 0, width: 100, height: 100),
     ])
-    let runtime = MouselessRuntime(
+    let runtime = KeyveerRuntime(
       permissions: .allGranted, topology: topology, pointer: Point(x: 50, y: 50))
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.l, at: 1))
@@ -1004,7 +1053,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testMovementUsesAChangedDisplayTopologyImmediately() throws {
-    let runtime = MouselessRuntime(
+    let runtime = KeyveerRuntime(
       permissions: .allGranted,
       topology: DisplayTopology(regions: [DisplayRegion(x: 0, y: 0, width: 100, height: 100)]),
       pointer: Point(x: 50, y: 50))
@@ -1031,7 +1080,7 @@ final class MouselessRuntimeTests: XCTestCase {
       DisplayRegion(x: -500, y: -200, width: 500, height: 400),
       DisplayRegion(x: 100, y: -50, width: 800, height: 200),
     ])
-    let runtime = MouselessRuntime(
+    let runtime = KeyveerRuntime(
       permissions: .allGranted, topology: topology, pointer: Point(x: -250, y: 0))
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.l, at: 1))
@@ -1047,7 +1096,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testTopologyChangeRepositionsAPointOutsideTheNewDisplays() {
-    let runtime = MouselessRuntime(
+    let runtime = KeyveerRuntime(
       permissions: .allGranted,
       topology: DisplayTopology(regions: [DisplayRegion(x: -500, y: -300, width: 500, height: 300)]),
       pointer: Point(x: -100, y: -100))
@@ -1063,7 +1112,7 @@ final class MouselessRuntimeTests: XCTestCase {
     let topology = DisplayTopology(regions: [
       DisplayRegion(x: -1_280, y: -200, width: 1_280, height: 800),
     ])
-    let runtime = MouselessRuntime(
+    let runtime = KeyveerRuntime(
       permissions: .allGranted, topology: topology, pointer: Point(x: -100, y: 0))
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.j, at: 1))
@@ -1081,7 +1130,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testKeyboardMovementContinuesFromAPhysicalPointerPosition() throws {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     let physical = runtime.handle(.pointerMoved(to: Point(x: -240, y: 180)))
     XCTAssertEqual(physical.effects, [.pointerPositionChanged(to: Point(x: -240, y: 180))])
 
@@ -1143,7 +1192,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testScrollSmoothingUsesTheConfigured47MillisecondTimeConstant() throws {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.m, at: 1))
 
@@ -1171,7 +1220,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testScrollReleaseDeceleratesToZeroWithoutFurtherEvents() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.m, at: 1))
     _ = runtime.handle(.frame(deltaTime: 0.2))
@@ -1184,7 +1233,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testConfigurationIsAtomicAndRejectsUnknownFields() throws {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     var validObject = try XCTUnwrap(
       JSONSerialization.jsonObject(with: RuntimeConfiguration.defaultJSON) as? [String: Any])
     var movement = try XCTUnwrap(validObject["movement"] as? [String: Any])
@@ -1219,7 +1268,7 @@ final class MouselessRuntimeTests: XCTestCase {
       bindings["activation"] = activation
       object["bindings"] = bindings
 
-      let response = MouselessRuntime(permissions: .allGranted).handle(
+      let response = KeyveerRuntime(permissions: .allGranted).handle(
         .configuration(try JSONSerialization.data(withJSONObject: object)))
       XCTAssertTrue(response.effects.contains(.configurationAccepted), activation)
     }
@@ -1228,7 +1277,7 @@ final class MouselessRuntimeTests: XCTestCase {
     var bindings = try XCTUnwrap(invalid["bindings"] as? [String: Any])
     bindings["activation"] = "space"
     invalid["bindings"] = bindings
-    let response = MouselessRuntime(permissions: .allGranted).handle(
+    let response = KeyveerRuntime(permissions: .allGranted).handle(
       .configuration(try JSONSerialization.data(withJSONObject: invalid)))
     XCTAssertTrue(response.effects.contains(where: { effect in
       if case .configurationRejected(let reason) = effect {
@@ -1244,7 +1293,7 @@ final class MouselessRuntimeTests: XCTestCase {
     var bindings = try XCTUnwrap(withRemovedField["bindings"] as? [String: Any])
     bindings["escape"] = "escape"
     withRemovedField["bindings"] = bindings
-    let removedResponse = MouselessRuntime(permissions: .allGranted).handle(
+    let removedResponse = KeyveerRuntime(permissions: .allGranted).handle(
       .configuration(try JSONSerialization.data(withJSONObject: withRemovedField)))
     XCTAssertTrue(removedResponse.effects.contains(where: { effect in
       if case .configurationRejected(let reason) = effect { return reason.contains("unknown field") }
@@ -1255,7 +1304,7 @@ final class MouselessRuntimeTests: XCTestCase {
     var actionBindings = try XCTUnwrap(asAction["bindings"] as? [String: Any])
     actionBindings["moveUp"] = "escape"
     asAction["bindings"] = actionBindings
-    let actionResponse = MouselessRuntime(permissions: .allGranted).handle(
+    let actionResponse = KeyveerRuntime(permissions: .allGranted).handle(
       .configuration(try JSONSerialization.data(withJSONObject: asAction)))
     XCTAssertTrue(actionResponse.effects.contains(where: { effect in
       if case .configurationRejected(let reason) = effect {
@@ -1276,7 +1325,7 @@ final class MouselessRuntimeTests: XCTestCase {
     bindings["moveRight"] = "i"
     object["bindings"] = bindings
 
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     let response = runtime.handle(
       .configuration(try JSONSerialization.data(withJSONObject: object)))
     XCTAssertTrue(response.effects.contains(.configurationAccepted))
@@ -1297,7 +1346,7 @@ final class MouselessRuntimeTests: XCTestCase {
       bindings["escape"] = "escape"
       object["bindings"] = bindings
 
-      let response = MouselessRuntime(permissions: .allGranted).handle(
+      let response = KeyveerRuntime(permissions: .allGranted).handle(
         .configuration(try JSONSerialization.data(withJSONObject: object)))
       XCTAssertTrue(response.effects.contains(where: { effect in
         if case .configurationRejected(let reason) = effect {
@@ -1310,7 +1359,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testRejectedMigrationLeavesPreviousV2ConfigurationActive() throws {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     _ = runtime.handle(.configuration(RuntimeConfiguration.defaultJSON))
 
     var invalid = try configurationObject()
@@ -1332,7 +1381,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testAcceptedConfigurationReleasesButtonsBeforeReplacingBindings() throws {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.space, at: 1))
 
@@ -1349,14 +1398,14 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testDefaultConfigurationJSONContainsTheConfirmedDefaultsAndSchemaVersion() throws {
-    let accepted = MouselessRuntime(permissions: .allGranted).handle(
+    let accepted = KeyveerRuntime(permissions: .allGranted).handle(
       .configuration(RuntimeConfiguration.defaultJSON))
 
     XCTAssertTrue(accepted.effects.contains(.configurationAccepted))
   }
 
   func testValidConfigurationChangesBindingsThresholdScrollAndIndicator() throws {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     var object = try configurationObject()
     var bindings = try XCTUnwrap(object["bindings"] as? [String: Any])
     bindings["moveUp"] = "l"
@@ -1398,7 +1447,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testValidConfigurationChangesRuntimeBehaviorAndIndicatorSize() throws {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     var object = try configurationObject()
     var movement = try XCTUnwrap(object["movement"] as? [String: Any])
     movement["baseSpeed"] = 600.0
@@ -1418,7 +1467,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testRejectedConfigurationPreservesThePreviousValidBehavior() throws {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     var validObject = try configurationObject()
     var movement = try XCTUnwrap(validObject["movement"] as? [String: Any])
     movement["baseSpeed"] = 600.0
@@ -1439,7 +1488,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testConfigurationRejectsMalformedJSONWithAReadableReason() {
-    let response = MouselessRuntime(permissions: .allGranted).handle(
+    let response = KeyveerRuntime(permissions: .allGranted).handle(
       .configuration(Data("{not json".utf8)))
 
     XCTAssertTrue(response.effects.contains(where: { effect in
@@ -1452,7 +1501,7 @@ final class MouselessRuntimeTests: XCTestCase {
     var object = try configurationObject()
     object["schemaVersion"] = 3
 
-    let response = MouselessRuntime(permissions: .allGranted).handle(
+    let response = KeyveerRuntime(permissions: .allGranted).handle(
       .configuration(try JSONSerialization.data(withJSONObject: object)))
 
     XCTAssertTrue(response.effects.contains(where: { effect in
@@ -1469,7 +1518,7 @@ final class MouselessRuntimeTests: XCTestCase {
     bindings["moveDown"] = bindings["moveUp"]
     object["bindings"] = bindings
 
-    let response = MouselessRuntime(permissions: .allGranted).handle(
+    let response = KeyveerRuntime(permissions: .allGranted).handle(
       .configuration(try JSONSerialization.data(withJSONObject: object)))
 
     XCTAssertTrue(response.effects.contains(where: { effect in
@@ -1484,7 +1533,7 @@ final class MouselessRuntimeTests: XCTestCase {
     scrolling["smoothingMilliseconds"] = 0.0
     object["scrolling"] = scrolling
 
-    let response = MouselessRuntime(permissions: .allGranted).handle(
+    let response = KeyveerRuntime(permissions: .allGranted).handle(
       .configuration(try JSONSerialization.data(withJSONObject: object)))
 
     XCTAssertTrue(response.effects.contains(where: { effect in
@@ -1562,7 +1611,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testEventTapFailureSafelyExitsBeforeRequestingRecovery() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.space, at: 1))
     let response = runtime.handle(.eventTapDisabled)
@@ -1580,7 +1629,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   func testEventTapRecoveryFailureExitsAndReturnsAllKeyboardEvents() {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.space, at: 1))
 
@@ -1592,7 +1641,7 @@ final class MouselessRuntimeTests: XCTestCase {
     XCTAssertEqual(runtime.handle(.keyDown(.l, at: 2)).disposition, .passThrough)
   }
 
-  private func enterFreeMode(_ runtime: MouselessRuntime) {
+  private func enterFreeMode(_ runtime: KeyveerRuntime) {
     _ = runtime.handle(.keyDown(.leftOption, at: 0))
     _ = runtime.handle(.keyUp(.leftOption, at: 0.1))
   }
@@ -1605,7 +1654,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   private func heldMovement(frameDelta: TimeInterval, frameCount: Int) -> Double {
-    let runtime = MouselessRuntime(permissions: .allGranted, pointer: Point(x: 0, y: 0))
+    let runtime = KeyveerRuntime(permissions: .allGranted, pointer: Point(x: 0, y: 0))
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.l, at: 1))
     var lastPoint = 0.0
@@ -1617,8 +1666,8 @@ final class MouselessRuntimeTests: XCTestCase {
     return lastPoint
   }
 
-  private func scrollingRuntime() -> MouselessRuntime {
-    MouselessRuntime(
+  private func scrollingRuntime() -> KeyveerRuntime {
+    KeyveerRuntime(
       configuration: RuntimeConfiguration(
         scrolling: ScrollSettings(smoothingMilliseconds: 1)), permissions: .allGranted)
   }
@@ -1631,7 +1680,7 @@ final class MouselessRuntimeTests: XCTestCase {
   }
 
   private func scrollingTotal(frameDelta: TimeInterval, frameCount: Int) -> Int {
-    let runtime = MouselessRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
     _ = runtime.handle(.keyDown(.m, at: 1))
     var total = 0

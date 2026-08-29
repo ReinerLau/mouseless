@@ -1,4 +1,4 @@
-name: Mouseless
+name: Keyveer
 options:
   deploymentTarget:
     macOS: "14.0"
@@ -9,57 +9,57 @@ settings:
     SWIFT_VERSION: "5.9"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
     CODE_SIGN_STYLE: Manual
-    CODE_SIGN_IDENTITY: "Mouseless Local Development"
+    CODE_SIGN_IDENTITY: "Keyveer Local Development"
     ENABLE_HARDENED_RUNTIME: YES
     ENABLE_APP_SANDBOX: NO
     CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
 targets:
-  MouselessRuntime:
+  KeyveerRuntime:
     type: framework
     platform: macOS
     sources:
-      - path: Sources/MouselessRuntime
+      - path: Sources/KeyveerRuntime
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.reinerlau.mouseless.runtime
+        PRODUCT_BUNDLE_IDENTIFIER: com.reinerlau.keyveer.runtime
         DEFINES_MODULE: YES
         GENERATE_INFOPLIST_FILE: YES
-  Mouseless:
+  Keyveer:
     type: application
     platform: macOS
     sources:
-      - path: Sources/MouselessApp
+      - path: Sources/KeyveerApp
     dependencies:
-      - target: MouselessRuntime
+      - target: KeyveerRuntime
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.reinerlau.mouseless
-        PRODUCT_NAME: Mouseless
+        PRODUCT_BUNDLE_IDENTIFIER: com.reinerlau.keyveer
+        PRODUCT_NAME: Keyveer
         INFOPLIST_KEY_LSUIElement: NO
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: 0.1.0
         GENERATE_INFOPLIST_FILE: YES
         OTHER_SWIFT_FLAGS: "-parse-as-library"
-  MouselessRuntimeTests:
+  KeyveerRuntimeTests:
     type: bundle.unit-test
     platform: macOS
     sources:
-      - path: Tests/MouselessRuntimeTests
+      - path: Tests/KeyveerRuntimeTests
     dependencies:
-      - target: MouselessRuntime
+      - target: KeyveerRuntime
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.reinerlau.mouseless.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.reinerlau.keyveer.tests
         GENERATE_INFOPLIST_FILE: YES
 schemes:
-  Mouseless:
+  Keyveer:
     build:
       targets:
-        Mouseless: all
+        Keyveer: all
     run:
       config: Debug
     test:
       config: Debug
       targets:
-        - MouselessRuntimeTests
+        - KeyveerRuntimeTests

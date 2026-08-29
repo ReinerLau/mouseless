@@ -2,12 +2,13 @@ import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
 import CoreGraphics
-import MouselessRuntime
+import KeyveerRuntime
 import OSLog
 import QuartzCore
 
-private let synthesizedEventMarker: Int64 = 0x4D4F_5553_4C45_5353
-private let logger = Logger(subsystem: "com.reinerlau.mouseless", category: "runtime")
+private let synthesizedEventMarker: Int64 = 0x4B45_5956_4545_5200
+private let logger = Logger(subsystem: "com.reinerlau.keyveer", category: "runtime")
+private let multiClickPointTolerance: CGFloat = 2
 
 private func primaryScreenTop() -> CGFloat {
   CGDisplayBounds(CGMainDisplayID()).maxY
@@ -21,14 +22,19 @@ private func quartzPoint(fromRuntime point: Point) -> CGPoint {
   CGPoint(x: point.x, y: point.y)
 }
 
+private struct ClickSequence {
+  var count: Int64 = 0
+  var lastDownTime: TimeInterval?
+  var lastPoint: CGPoint?
+}
+
 private final class SystemPermissionProvider {
   func current(prompt: Bool) -> PermissionState {
     let options =
       [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt] as CFDictionary
     let accessibility = AXIsProcessTrustedWithOptions(options)
-    let listen = CGPreflightListenEventAccess() || (prompt && CGRequestListenEventAccess())
-    let post = CGPreflightPostEventAccess() || (prompt && CGRequestPostEventAccess())
-    return PermissionState(accessibility: accessibility, listenEvent: listen, postEvent: post)
+    return PermissionState(
+      accessibility: accessibility, postEvent: CGPreflightPostEventAccess())
   }
 }
 
@@ -68,7 +74,9 @@ private final class DiagnosticCollector {
 }
 
 private final class CoreGraphicsEffectExecutor {
-  private let queue = DispatchQueue(label: "com.reinerlau.mouseless.effects")
+  private let queue = DispatchQueue(label: "com.reinerlau.keyveer.effects")
+  private var clickSequences: [MouseButton: ClickSequence] = [:]
+  private var pointerLocation: CGPoint?
 
   func submit(_ effects: [RuntimeEffect], completion: @escaping () -> Void = {}) {
     queue.async { [weak self] in
@@ -105,12 +113,14 @@ private final class CoreGraphicsEffectExecutor {
   private func execute(_ effect: RuntimeEffect) {
     switch effect {
     case .pointerMoved(to: let point, let buttons):
+      let quartzPoint = quartzPoint(fromRuntime: point)
+      pointerLocation = quartzPoint
       if buttons.isEmpty {
-        postMouse(type: .mouseMoved, point: quartzPoint(fromRuntime: point), button: .left)
+        postMouse(type: .mouseMoved, point: quartzPoint, button: .left)
       } else {
         for button in buttons.sorted(by: { $0.rawValue < $1.rawValue }) {
           postMouse(
-            type: draggedType(for: button), point: quartzPoint(fromRuntime: point),
+            type: draggedType(for: button), point: quartzPoint,
             button: cgButton(for: button))
         }
       }
@@ -123,8 +133,13 @@ private final class CoreGraphicsEffectExecutor {
       case (.right, .up): type = .rightMouseUp
       default: type = phase == .down ? .otherMouseDown : .otherMouseUp
       }
+      // The runtime's pointer is authoritative. Reading the global cursor here can lag behind
+      // a just-posted virtual move, which makes a click land on the previously selected item.
+      let point = pointerLocation ?? CGEvent(source: nil)?.location ?? .zero
+      let metadata = eventMetadata(for: button, phase: phase, point: point)
       postMouse(
-        type: type, point: CGEvent(source: nil)?.location ?? .zero, button: cgButton(for: button))
+        type: type, point: point, button: cgButton(for: button),
+        clickState: metadata)
     case .scroll(let pixelX, let pixelY):
       guard
         let event = CGEvent(
@@ -137,12 +152,45 @@ private final class CoreGraphicsEffectExecutor {
     }
   }
 
-  private func postMouse(type: CGEventType, point: CGPoint, button: CGMouseButton) {
+  private func eventMetadata(
+    for button: MouseButton, phase: ButtonPhase, point: CGPoint
+  ) -> Int64? {
+    switch phase {
+    case .down:
+      var sequence = clickSequences[button] ?? ClickSequence()
+      let now = CACurrentMediaTime()
+      if let lastDownTime = sequence.lastDownTime,
+        let lastPoint = sequence.lastPoint,
+        now - lastDownTime <= NSEvent.doubleClickInterval,
+        distance(lastPoint, point) <= multiClickPointTolerance
+      {
+        sequence.count += 1
+      } else {
+        sequence.count = 1
+      }
+      sequence.lastDownTime = now
+      sequence.lastPoint = point
+      clickSequences[button] = sequence
+      return sequence.count
+    case .up:
+      guard let sequence = clickSequences[button] else {
+        return nil
+      }
+      return sequence.count
+    }
+  }
+
+  private func postMouse(
+    type: CGEventType, point: CGPoint, button: CGMouseButton, clickState: Int64? = nil
+  ) {
     guard
       let event = CGEvent(
         mouseEventSource: CGEventSource(stateID: .combinedSessionState), mouseType: type,
         mouseCursorPosition: point, mouseButton: button)
     else { return }
+    if let clickState {
+      event.setIntegerValueField(.mouseEventClickState, value: clickState)
+    }
     event.setIntegerValueField(.eventSourceUserData, value: synthesizedEventMarker)
     event.post(tap: .cghidEventTap)
   }
@@ -150,6 +198,11 @@ private final class CoreGraphicsEffectExecutor {
   private func cgButton(for button: MouseButton) -> CGMouseButton {
     CGMouseButton(rawValue: UInt32(button.rawValue))!
   }
+
+  private func distance(_ lhs: CGPoint, _ rhs: CGPoint) -> CGFloat {
+    hypot(lhs.x - rhs.x, lhs.y - rhs.y)
+  }
+
   private func draggedType(for button: MouseButton) -> CGEventType {
     switch button {
     case .left: return .leftMouseDragged
@@ -303,12 +356,12 @@ private final class IndicatorController {
   }
 }
 
-private final class MouselessApplicationController: NSObject {
+private final class KeyveerApplicationController: NSObject {
   private let permissions = SystemPermissionProvider()
   private let executor = CoreGraphicsEffectExecutor()
   private let indicator = IndicatorController()
   private let diagnostics = DiagnosticCollector()
-  private let runtime = MouselessRuntime()
+  private let runtime = KeyveerRuntime()
   private let runtimeLock = NSLock()
   private var eventTap: EventTapHost?
   private let eventTapLock = NSLock()
@@ -355,7 +408,9 @@ private final class MouselessApplicationController: NSObject {
     let initialPointer = CGEvent(source: nil)?.location ?? .zero
     apply(runtimeResponse(for: .pointerMoved(to: Point(x: initialPointer.x, y: initialPointer.y))))
     registerLifecycleObservers()
-    checkPermissions(prompt: true)
+    // Permission prompts are user-initiated from the menu. Launch only inspects current state so
+    // it cannot consume or obscure the first explicit request.
+    checkPermissions(prompt: false)
     displayLink = NSScreen.main?.displayLink(target: self, selector: #selector(frame(_:)))
     displayLink?.add(to: .main, forMode: .common)
   }
@@ -381,6 +436,8 @@ private final class MouselessApplicationController: NSObject {
   private func configureMenu() {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     statusItem = item
+    item.button?.imagePosition = .imageOnly
+    item.button?.imageScaling = .scaleNone
     updateStatus(runtime.freeModeStatus)
     let menu = NSMenu()
     menu.addItem(menuItem("Request Permissions", #selector(requestPermissions)))
@@ -391,7 +448,7 @@ private final class MouselessApplicationController: NSObject {
     reloadMenuItem = reload
     menu.addItem(menuItem("Copy Diagnostic Summary", #selector(copyDiagnostics)))
     menu.addItem(.separator())
-    menu.addItem(menuItem("Quit Mouseless", #selector(quit)))
+    menu.addItem(menuItem("Quit Keyveer", #selector(quit)))
     item.menu = menu
   }
 
@@ -611,7 +668,7 @@ private final class MouselessApplicationController: NSObject {
       case .freeModeStatusChanged(let status): updateStatus(status)
       case .capabilitiesChanged(let state):
         logger.notice(
-          "Capabilities changed: accessibility=\(state.accessibility), listenEvent=\(state.listenEvent), postEvent=\(state.postEvent)"
+          "Capabilities changed: accessibility=\(state.accessibility), postEvent=\(state.postEvent)"
         )
       case .modeChanged(let isEnabled):
         logger.info("Free mode changed: enabled=\(isEnabled)")
@@ -659,7 +716,16 @@ private final class MouselessApplicationController: NSObject {
     pollPermissions()
   }
 
-  @objc private func requestPermissions() { checkPermissions(prompt: true) }
+  @objc private func requestPermissions() {
+    let coordinator = PermissionRequestCoordinator(
+      request: { [permissions] in permissions.current(prompt: true) },
+      apply: { [weak self] state in
+        self?.lastPermissionState = state
+        self?.reconcilePermissions(state, clearEventTapFailure: true)
+      },
+      present: { [weak self] feedback in self?.presentPermissionFeedback(feedback) })
+    coordinator.run()
+  }
   @objc private func recheckPermissions() { checkPermissions(prompt: false) }
   @objc private func reloadConfigurationFromMenu() { reloadConfiguration(createIfMissing: false) }
 
@@ -693,12 +759,46 @@ private final class MouselessApplicationController: NSObject {
 
   private func configurationURL() -> URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("Mouseless", isDirectory: true).appendingPathComponent("config.json")
+      .appendingPathComponent("Keyveer", isDirectory: true).appendingPathComponent("config.json")
   }
 
   @objc private func openSystemSettings() {
-    NSWorkspace.shared.open(
-      URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+    openAccessibilitySettings()
+  }
+
+  private func presentPermissionFeedback(_ feedback: PermissionRequestFeedback) {
+    switch feedback {
+    case .allGranted:
+      let alert = NSAlert()
+      alert.messageText = "Permissions Granted"
+      alert.informativeText = "Keyveer has Accessibility access."
+      alert.alertStyle = .informational
+      alert.addButton(withTitle: "OK")
+      NSApp.activate(ignoringOtherApps: true)
+      alert.runModal()
+    case .openAccessibilitySettings:
+      openAccessibilitySettings()
+    }
+  }
+
+  private func openAccessibilitySettings() {
+    let anchor = "Privacy_Accessibility"
+    guard
+      let url = URL(
+        string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)"),
+      NSWorkspace.shared.open(url)
+    else {
+      let alert = NSAlert()
+      alert.messageText = "Could Not Open System Settings"
+      alert.informativeText =
+        "Open Privacy & Security in System Settings and grant Keyveer the requested access."
+      alert.alertStyle = .warning
+      alert.addButton(withTitle: "OK")
+      NSApp.activate(ignoringOtherApps: true)
+      alert.runModal()
+      return
+    }
+    logger.notice("Opened System Settings for \(anchor, privacy: .public)")
   }
 
   @objc private func copyDiagnostics() {
@@ -722,9 +822,15 @@ private final class MouselessApplicationController: NSObject {
 
   private func updateStatus(_ status: FreeModeStatus) {
     guard let button = statusItem?.button else { return }
-    button.title = status.menuBarTitle
+    button.title = ""
+    let symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 16, weight: .regular)
+    button.image = NSImage(
+      systemSymbolName: status.menuBarSymbolName,
+      accessibilityDescription: "Keyveer")?.withSymbolConfiguration(symbolConfiguration)
+    button.image?.size = NSSize(width: 15, height: 15)
+    button.image?.isTemplate = true
     button.toolTip = status.accessibilityDescription
-    button.setAccessibilityLabel(status.menuBarTitle)
+    button.setAccessibilityLabel(status.accessibilityDescription)
     button.setAccessibilityHelp(status.accessibilityDescription)
   }
 
@@ -901,6 +1007,16 @@ private final class MouselessApplicationController: NSObject {
     if !event.flags.contains(.maskControl) { state.subtract(.control) }
     if !event.flags.contains(.maskAlternate) { state.subtract(.option) }
     if !event.flags.contains(.maskShift) { state.subtract(.shift) }
+    if event.flags.contains(.maskAlphaShift) {
+      state.insert(.capsLock)
+    } else {
+      state.remove(.capsLock)
+    }
+    if event.flags.contains(.maskSecondaryFn) {
+      state.insert(.function)
+    } else {
+      state.remove(.function)
+    }
     keyboardModifiers = state
     return state
   }
@@ -912,10 +1028,10 @@ private final class MouselessApplicationController: NSObject {
 }
 
 @main
-struct MouselessAppMain {
+struct KeyveerAppMain {
   static func main() {
     let application = NSApplication.shared
-    let controller = MouselessApplicationController()
+    let controller = KeyveerApplicationController()
     let delegate = AppDelegate(controller: controller)
     application.delegate = delegate
     application.setActivationPolicy(.regular)
@@ -925,8 +1041,8 @@ struct MouselessAppMain {
 }
 
 private final class AppDelegate: NSObject, NSApplicationDelegate {
-  let controller: MouselessApplicationController
-  init(controller: MouselessApplicationController) { self.controller = controller }
+  let controller: KeyveerApplicationController
+  init(controller: KeyveerApplicationController) { self.controller = controller }
   func applicationDidFinishLaunching(_ notification: Notification) { controller.start() }
   func applicationWillTerminate(_ notification: Notification) { controller.stop() }
 }

@@ -99,21 +99,48 @@ private func squaredDistance(_ lhs: Point, _ rhs: Point) -> Double {
 
 public struct PermissionState: Equatable, Sendable {
   public var accessibility: Bool
-  public var listenEvent: Bool
   public var postEvent: Bool
 
-  public init(accessibility: Bool, listenEvent: Bool, postEvent: Bool) {
+  public init(accessibility: Bool, postEvent: Bool) {
     self.accessibility = accessibility
-    self.listenEvent = listenEvent
     self.postEvent = postEvent
   }
 
-  public static let none = PermissionState(
-    accessibility: false, listenEvent: false, postEvent: false)
-  public static let allGranted = PermissionState(
-    accessibility: true, listenEvent: true, postEvent: true)
+  public static let none = PermissionState(accessibility: false, postEvent: false)
+  public static let allGranted = PermissionState(accessibility: true, postEvent: true)
 
-  public var isReady: Bool { accessibility && listenEvent && postEvent }
+  public var isReady: Bool { accessibility && postEvent }
+}
+
+public enum PermissionRequestFeedback: Equatable, Sendable {
+  case allGranted
+  case openAccessibilitySettings
+
+  public init(state: PermissionState) {
+    self = state.isReady ? .allGranted : .openAccessibilitySettings
+  }
+}
+
+public struct PermissionRequestCoordinator {
+  private let request: () -> PermissionState
+  private let apply: (PermissionState) -> Void
+  private let present: (PermissionRequestFeedback) -> Void
+
+  public init(
+    request: @escaping () -> PermissionState,
+    apply: @escaping (PermissionState) -> Void,
+    present: @escaping (PermissionRequestFeedback) -> Void
+  ) {
+    self.request = request
+    self.apply = apply
+    self.present = present
+  }
+
+  public func run() {
+    let state = request()
+    apply(state)
+    present(PermissionRequestFeedback(state: state))
+  }
 }
 
 public enum Key: Hashable, Sendable {
@@ -459,10 +486,10 @@ public struct DiagnosticSummary: Equatable, Sendable {
   public var text: String {
     let counters = counters
     return [
-      "Mouseless diagnostics",
+      "Keyveer diagnostics",
       "version: \(singleLine(version))",
       "buildIdentity: \(singleLine(buildIdentity))",
-      "permissions: accessibility=\(permissions.accessibility), listenEvent=\(permissions.listenEvent), postEvent=\(permissions.postEvent)",
+      "permissions: accessibility=\(permissions.accessibility), postEvent=\(permissions.postEvent)",
       "configuration: \(configuration.rawValue)",
       "eventTap: \(eventTap.rawValue)",
       "callbacks: \(counters.callbackCount)",
@@ -518,13 +545,19 @@ public enum FreeModeStatus: String, Equatable, Sendable {
     }
   }
 
-  public var menuBarTitle: String { "Mouseless \(symbol)" }
+  public var menuBarSymbolName: String {
+    switch self {
+    case .available: return "computermouse"
+    case .enabled: return "computermouse.fill"
+    case .unavailable: return "exclamationmark.triangle.fill"
+    }
+  }
 
   public var accessibilityDescription: String {
     switch self {
-    case .available: return "Mouseless: available; free mode is off."
-    case .enabled: return "Mouseless: enabled; free mode is on."
-    case .unavailable: return "Mouseless: unavailable; free mode is off."
+    case .available: return "Keyveer: available; free mode is off."
+    case .enabled: return "Keyveer: enabled; free mode is on."
+    case .unavailable: return "Keyveer: unavailable; free mode is off."
     }
   }
 }
@@ -1000,7 +1033,7 @@ public enum ConfigurationError: Error, Equatable, Sendable, LocalizedError {
     case .invalidActivationKey(let value):
       return "invalid activation key \(value); activation must be leftOption or rightOption"
     case .reservedKey(let name, let value):
-      return "reserved key for \(name): \(value); physical Escape cannot be a Mouseless binding"
+      return "reserved key for \(name): \(value); physical Escape cannot be a Keyveer binding"
     }
   }
 }
@@ -1057,7 +1090,7 @@ private func decodingErrorDescription(_ error: Error) -> String {
   }
 }
 
-public final class MouselessRuntime {
+public final class KeyveerRuntime {
   private var configuration: RuntimeConfiguration
   private var permissions: PermissionState
   private var eventTapHealthy: Bool
@@ -1272,7 +1305,11 @@ public final class MouselessRuntime {
       if !isAutoRepeat {
         activationDownAt = timestamp
         let activationModifier = KeyboardModifiers.modifier(for: key) ?? []
-        activationHadCombination = !modifiers.subtracting(activationModifier).isEmpty
+        let persistentCapsLock = KeyboardModifiers.capsLock
+        activationHadCombination = !modifiers
+          .subtracting(activationModifier)
+          .subtracting(persistentCapsLock)
+          .isEmpty
         keyboardDispositions[key] = .passThrough
       }
       return RuntimeResponse(disposition: .passThrough)

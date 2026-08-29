@@ -2,15 +2,15 @@
 import PackageDescription
 
 let package = Package(
-    name: "Mouseless",
+    name: "Keyveer",
     platforms: [.macOS(.v14)],
     products: [
-        .library(name: "MouselessRuntime", targets: ["MouselessRuntime"]),
-        .executable(name: "Mouseless", targets: ["MouselessApp"])
+        .library(name: "KeyveerRuntime", targets: ["KeyveerRuntime"]),
+        .executable(name: "Keyveer", targets: ["KeyveerApp"])
     ],
     targets: [
-        .target(name: "MouselessRuntime"),
-        .executableTarget(name: "MouselessApp", dependencies: ["MouselessRuntime"]),
-        .testTarget(name: "MouselessRuntimeTests", dependencies: ["MouselessRuntime"])
+        .target(name: "KeyveerRuntime"),
+        .executableTarget(name: "KeyveerApp", dependencies: ["KeyveerRuntime"]),
+        .testTarget(name: "KeyveerRuntimeTests", dependencies: ["KeyveerRuntime"])
     ]
 )

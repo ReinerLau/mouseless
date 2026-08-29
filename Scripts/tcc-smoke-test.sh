@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_PATH="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../build/Build/Products/Release" && pwd)/Mouseless.app}"
-EXPECTED_IDENTIFIER="com.reinerlau.mouseless"
-EXPECTED_IDENTITY="Mouseless Local Development"
+APP_PATH="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../build/Build/Products/Release" && pwd)/Keyveer.app}"
+EXPECTED_IDENTIFIER="com.reinerlau.keyveer"
+EXPECTED_IDENTITY="Keyveer Local Development"
 
 [[ -d "$APP_PATH" ]] || { echo "App bundle not found: $APP_PATH" >&2; exit 1; }
 codesign --verify --strict --verbose=2 "$APP_PATH"

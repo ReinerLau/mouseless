@@ -61,6 +61,6 @@ postKey(optionKey, isDown: true)
 postKey(optionKey, isDown: false)
 
 guard end.x > start.x + 10 else {
-  fputs("Mouseless did not produce measurable rightward movement.\n", stderr)
+  fputs("Keyveer did not produce measurable rightward movement.\n", stderr)
   exit(1)
 }

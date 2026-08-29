@@ -1,4 +1,4 @@
-# Mouseless daily-use candidate acceptance
+# Keyveer daily-use candidate acceptance
 
 This document is the operator record for Issue #11. It is intentionally a
 manual record: TCC, display topology, lock/sleep behavior, Instruments, and
@@ -23,15 +23,15 @@ Record the following before the first run:
 | Git revision | |
 | Source state / working-tree fingerprint | |
 | Version / build number | |
-| Designated requirement | `identifier "com.reinerlau.mouseless"` |
-| Signing identity | `Mouseless Local Development` |
+| Designated requirement | `identifier "com.reinerlau.keyveer"` |
+| Signing identity | `Keyveer Local Development` |
 | macOS version | |
 | Displays and refresh rates | |
 | Starting TCC state | Accessibility / Listen Event / Post Event |
 | Acceptance start date and time | |
 
 Rebuild the candidate once after permissions have been granted. Run
-`./Scripts/tcc-smoke-test.sh build/candidate/Build/Products/Release/Mouseless.app`
+`./Scripts/tcc-smoke-test.sh build/candidate/Build/Products/Release/Keyveer.app`
 and confirm in System Settings that the same application still has its three
 permissions. A changed bundle identifier or signing identity is a failure,
 not a new candidate identity to silently accept.
@@ -42,7 +42,7 @@ Run the existing focused smoke scripts after the candidate build. Each script
 must be run with the candidate app path where it accepts an argument:
 
 ```sh
-APP=build/candidate/Build/Products/Release/Mouseless.app
+APP=build/candidate/Build/Products/Release/Keyveer.app
 ./Scripts/configuration-smoke-test.sh "$APP"
 ./Scripts/motion-smoke-test.sh "$APP"
 ./Scripts/button-smoke-test.sh "$APP"
@@ -56,7 +56,7 @@ Record a check only after observing the result in the real app:
 - [ ] Accessibility, Listen Event, and Post Event can be granted from the requested flow; incomplete permissions pass keys through and cannot enter free mode.
 - [ ] Rebuilding with the fixed identity preserves the existing TCC grant.
 - [ ] Left Option enters and exits free mode as the fixed safety exit; Escape's down, repeat, and up events pass through; ordinary application switching leaves free mode unchanged.
-- [ ] In free mode, every ANSI letter, number, punctuation key, Space, keypad number/operator/decimal key, and available ISO/JIS character key is consumed without text leakage when unmapped; mapped keys still perform their Mouseless action.
+- [ ] In free mode, every ANSI letter, number, punctuation key, Space, keypad number/operator/decimal key, and available ISO/JIS character key is consumed without text leakage when unmapped; mapped keys still perform their Keyveer action.
 - [ ] Return, keypad Enter, Delete, Forward Delete, Tab, Escape, arrows, Home, End, Page Up/Down, function keys, and media keys pass through; Shift, Caps Lock, right Option, and Fn do not bypass character protection.
 - [ ] Command/Control shortcuts pass through completely, and a key's down/repeat/up decision remains paired across entry, Left Option exit, Left Option release, permission loss, lock, sleep, and event-tap recovery.
 - [ ] Immediately after entering free mode, the blue indicator is at the current pointer location within one display refresh; I/J/K/L move up/left/down/right, including diagonals and opposing directions.
@@ -75,7 +75,7 @@ Record a check only after observing the result in the real app:
 The Release candidate's process budget is measured with:
 
 ```sh
-./Scripts/performance-smoke-test.sh build/candidate/Build/Products/Release/Mouseless.app
+./Scripts/performance-smoke-test.sh build/candidate/Build/Products/Release/Keyveer.app
 ```
 
 The script records a ten-second idle window and a ten-second continuous

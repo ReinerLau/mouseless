@@ -2,8 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-APP_PATH="${1:-$SCRIPT_DIR/../build/Build/Products/Release/Mouseless.app}"
-BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/mouseless-motion-smoke.XXXXXX")
+APP_PATH="${1:-$SCRIPT_DIR/../build/Build/Products/Release/Keyveer.app}"
+BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/keyveer-motion-smoke.XXXXXX")
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
 [[ -d "$APP_PATH" ]] || {
@@ -19,7 +19,7 @@ command -v swiftc >/dev/null || {
 
 open "$APP_PATH"
 sleep 1
-read -r -p "Confirm Mouseless is running and Permissions says Ready [y/N]: " ready
+read -r -p "Confirm Keyveer is running and Permissions says Ready [y/N]: " ready
 case "$ready" in
   y | Y | yes | YES) ;;
   *)

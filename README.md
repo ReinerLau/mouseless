@@ -1,10 +1,10 @@
-# Mouseless
+# Keyveer
 
-Mouseless is a personal macOS 14+ menu-bar utility for controlling the pointer with the keyboard in **自由模式** (free mode). It is intentionally local-only and has no App Sandbox.
+Keyveer is a personal macOS 14+ menu-bar utility for controlling the pointer with the keyboard in **自由模式** (free mode). It is intentionally local-only and has no App Sandbox.
 
 ## Build
 
-Install [XcodeGen](https://github.com/yonaskolb/XcodeGen), make sure the local certificate `Mouseless Local Development` exists in the login keychain, and run:
+Install [XcodeGen](https://github.com/yonaskolb/XcodeGen), make sure the local certificate `Keyveer Local Development` exists in the login keychain, and run:
 
 ```sh
 ./Scripts/build-and-run.sh
@@ -17,7 +17,7 @@ test suite, Release build, designated-requirement check, and candidate manifest:
 ./Scripts/candidate-build.sh
 ```
 
-The build-and-run script generates the Xcode project from `project.yml`, builds with the fixed bundle identifier `com.reinerlau.mouseless`, verifies the designated requirement and Hardened Runtime, then launches the menu-bar agent. The signature/TCC smoke-test conclusion is recorded in `docs/adr/0001-use-a-fixed-local-signing-identity.md`; the interactive TCC checks are documented in the prototype branch referenced there.
+The build-and-run script generates the Xcode project from `project.yml`, builds with the fixed bundle identifier `com.reinerlau.keyveer`, verifies the designated requirement and Hardened Runtime, then launches the menu-bar agent. The signature/TCC smoke-test conclusion is recorded in `docs/adr/0001-use-a-fixed-local-signing-identity.md`; the interactive TCC checks are documented in the prototype branch referenced there.
 
 Run the deterministic runtime suite with:
 
@@ -25,14 +25,14 @@ Run the deterministic runtime suite with:
 swift test
 ```
 
-On first launch, use Request Permissions and grant Accessibility, Input Monitoring (Listen Event), and Post Event access. The menu offers Recheck Permissions, Open System Settings, Reload Configuration, diagnostics, and Quit.
+On first launch, use Request Permissions and grant Accessibility access. The menu offers Recheck Permissions, Open System Settings, Reload Configuration, diagnostics, and Quit.
 
 Copy Diagnostic Summary copies only version/build identity, capability state, configuration and event-tap
 status, plus aggregate callback, frame, recovery and effect counters. It does not include input,
 application, window or pointer history. In Debug builds, callback latency is also aggregated without
 recording individual events.
 
-The first launch creates `~/Library/Application Support/Mouseless/config.json`. Edit only the
+The first launch creates `~/Library/Application Support/Keyveer/config.json`. Edit only the
 documented JSON fields, then choose Reload Configuration from the menu. Invalid files are rejected
 without replacing the last valid runtime configuration. The interactive real-app check is
 `./Scripts/configuration-smoke-test.sh`.
@@ -46,7 +46,7 @@ The complete Issue #11 feature, performance, and seven-day operator record is
 continuous-movement CPU, and resident memory budgets with:
 
 ```sh
-./Scripts/performance-smoke-test.sh build/candidate/Build/Products/Release/Mouseless.app
+./Scripts/performance-smoke-test.sh build/candidate/Build/Products/Release/Keyveer.app
 ```
 
 Callback latency is checked from a Debug diagnostic summary with

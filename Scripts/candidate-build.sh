@@ -3,16 +3,18 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
-PROJECT="$REPO_ROOT/Mouseless.xcodeproj"
+PROJECT="$REPO_ROOT/Keyveer.xcodeproj"
 CONFIGURATION="${CONFIGURATION:-Release}"
 DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-$REPO_ROOT/build/candidate}"
-APP_PATH="$DERIVED_DATA_PATH/Build/Products/$CONFIGURATION/Mouseless.app"
+APP_PATH="$DERIVED_DATA_PATH/Build/Products/$CONFIGURATION/Keyveer.app"
 MANIFEST_PATH="${MANIFEST_PATH:-$DERIVED_DATA_PATH/candidate-manifest.txt}"
-EXPECTED_IDENTIFIER="com.reinerlau.mouseless"
-EXPECTED_IDENTITY="Mouseless Local Development"
+EXPECTED_IDENTIFIER="com.reinerlau.keyveer"
+EXPECTED_IDENTITY="Keyveer Local Development"
 
 command -v swift >/dev/null || { echo "swift is required; install Xcode first." >&2; exit 1; }
-command -v xcodegen >/dev/null || { echo "xcodegen is required; install it before building Mouseless." >&2; exit 1; }
+command -v xcodegen >/dev/null || { echo "xcodegen is required; install it before building Keyveer." >&2; exit 1; }
+
+"$SCRIPT_DIR/verify-brand-clean.sh"
 command -v xcodebuild >/dev/null || { echo "xcodebuild is required; install Xcode first." >&2; exit 1; }
 command -v codesign >/dev/null || { echo "codesign is required; install Xcode first." >&2; exit 1; }
 
@@ -35,12 +37,12 @@ xcodegen generate --spec "$REPO_ROOT/project.yml" --project "$REPO_ROOT"
 echo "Running the generated Xcode test scheme..."
 xcodebuild \
   -project "$PROJECT" \
-  -scheme Mouseless \
+  -scheme Keyveer \
   -configuration Debug \
   -derivedDataPath "$DERIVED_DATA_PATH" \
   test
 
-CALLBACK_SOURCE=$(sed -n '/private func handleTapEvent/,/private func runtimeResponse/p' "$REPO_ROOT/Sources/MouselessApp/main.swift")
+CALLBACK_SOURCE=$(sed -n '/private func handleTapEvent/,/private func runtimeResponse/p' "$REPO_ROOT/Sources/KeyveerApp/main.swift")
 if grep -Eq 'logger|apply\(|CGEvent\(|configurationURL\(' <<<"$CALLBACK_SOURCE"; then
   echo "Event-tap callback guard failed: callback path contains forbidden work." >&2
   exit 1
@@ -49,7 +51,7 @@ fi
 echo "Building the signed Release candidate..."
 xcodebuild \
   -project "$PROJECT" \
-  -scheme Mouseless \
+  -scheme Keyveer \
   -configuration "$CONFIGURATION" \
   -derivedDataPath "$DERIVED_DATA_PATH" \
   CODE_SIGN_IDENTITY="$EXPECTED_IDENTITY" \
@@ -61,7 +63,7 @@ DETAILS=$(codesign --display --verbose=4 "$APP_PATH" 2>&1)
 REQUIREMENTS=$(codesign --display --requirements - "$APP_PATH" 2>&1)
 VERSION=$(plutil -extract CFBundleShortVersionString raw -o - "$APP_PATH/Contents/Info.plist")
 BUILD_NUMBER=$(plutil -extract CFBundleVersion raw -o - "$APP_PATH/Contents/Info.plist")
-EXECUTABLE_SHA256=$(shasum -a 256 "$APP_PATH/Contents/MacOS/Mouseless" | awk '{print $1}')
+EXECUTABLE_SHA256=$(shasum -a 256 "$APP_PATH/Contents/MacOS/Keyveer" | awk '{print $1}')
 REQUIREMENTS_SINGLE_LINE=$(tr '\n' ' ' <<<"$REQUIREMENTS" | sed 's/[[:space:]]\+/ /g')
 GIT_REVISION=$(git -C "$REPO_ROOT" rev-parse HEAD)
 BUILT_AT_UTC=$(date -u '+%Y-%m-%dT%H:%M:%SZ')

@@ -104,7 +104,7 @@ func run() -> Int32 {
   }
   defer { capture.stop() }
 
-  print("Starting real-app scroll smoke test; ensure Mouseless is running, ready, and free mode is off.")
+  print("Starting real-app scroll smoke test; ensure Keyveer is running, ready, and free mode is off.")
   tapOption()
 
   let bindings: [(name: String, key: CGKeyCode, verticalSign: Int, horizontalSign: Int)] = [
