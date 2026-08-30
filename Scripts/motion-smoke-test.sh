@@ -19,7 +19,7 @@ command -v swiftc >/dev/null || {
 
 open "$APP_PATH"
 sleep 1
-read -r -p "Confirm Keyveer is running and Permissions says Ready [y/N]: " ready
+read -r -p "Confirm Keyveer is running, Permissions says Ready, and Free mode is Off [y/N]: " ready
 case "$ready" in
   y | Y | yes | YES) ;;
   *)

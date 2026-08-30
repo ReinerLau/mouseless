@@ -132,22 +132,12 @@ private func displacement(for keys: [CGKeyCode], duration: TimeInterval = 0.35) 
 }
 
 func run() -> Int32 {
-  print("Starting real-app motion smoke test; normalizing free mode state.")
-  if indicatorCenter() != nil { tapOption() }
+  print("Starting real-app motion smoke test; assuming free mode is off.")
   guard verifyHorizontalMultiDisplayMotion() else { return 1 }
   tapOption()
 
-  let pointer = pointerLocation()
-  guard let indicator = indicatorCenter() else {
-    fputs("FAIL: could not find the local app's visible indicator window.\n", stderr)
-    tapOption()
-    return 1
-  }
-  let indicatorDistance = hypot(indicator.x - pointer.x, indicator.y - pointer.y)
-  guard indicatorDistance <= 32 else {
-    fputs(
-      String(format: "FAIL: indicator is %.1f pt from the pointer immediately after entering free mode.\n", indicatorDistance),
-      stderr)
+  guard indicatorCenter() == nil else {
+    fputs("FAIL: the blue indicator is still visible after entering free mode.\n", stderr)
     tapOption()
     return 1
   }

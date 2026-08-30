@@ -466,7 +466,9 @@ final class KeyveerRuntimeTests: XCTestCase {
   }
 
   func testAQualifiedLeftOptionTapEntersFreeModeWhenCapabilitiesAreReady() {
-    let runtime = KeyveerRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(
+      configuration: RuntimeConfiguration(indicator: IndicatorSettings(enabled: true)),
+      permissions: .allGranted)
 
     _ = runtime.handle(.keyDown(.leftOption, at: 0))
     let response = runtime.handle(.keyUp(.leftOption, at: 0.1))
@@ -477,7 +479,9 @@ final class KeyveerRuntimeTests: XCTestCase {
   }
 
   func testModifierChangedLeftOptionTapEntersFreeModeWhenCapabilitiesAreReady() {
-    let runtime = KeyveerRuntime(permissions: .allGranted)
+    let runtime = KeyveerRuntime(
+      configuration: RuntimeConfiguration(indicator: IndicatorSettings(enabled: true)),
+      permissions: .allGranted)
 
     _ = runtime.handle(.modifierChanged(.leftOption, isPressed: true, at: 0))
     let response = runtime.handle(.modifierChanged(.leftOption, isPressed: false, at: 0.1))
@@ -1440,6 +1444,11 @@ final class KeyveerRuntimeTests: XCTestCase {
   }
 
   func testDefaultConfigurationJSONContainsTheConfirmedDefaultsAndSchemaVersion() throws {
+    let object = try XCTUnwrap(
+      JSONSerialization.jsonObject(with: RuntimeConfiguration.defaultJSON) as? [String: Any])
+    let indicator = try XCTUnwrap(object["indicator"] as? [String: Any])
+    XCTAssertEqual(indicator["enabled"] as? Bool, false)
+
     let accepted = KeyveerRuntime(permissions: .allGranted).handle(
       .configuration(RuntimeConfiguration.defaultJSON))
 

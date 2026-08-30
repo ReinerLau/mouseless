@@ -814,7 +814,7 @@ public struct IndicatorSettings: Codable, Equatable, Sendable {
   public var enabled: Bool
   public var size: Double
 
-  public init(enabled: Bool = true, size: Double = 8) {
+  public init(enabled: Bool = false, size: Double = 8) {
     self.enabled = enabled
     self.size = size
   }
