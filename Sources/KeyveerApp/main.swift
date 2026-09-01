@@ -314,36 +314,61 @@ private func eventTapCallback(
     type: type, event: event)
 }
 
-private final class IndicatorController {
-  private final class IndicatorView: NSView {
+private final class CursorHaloController {
+  private final class HaloView: NSView {
     override func draw(_ dirtyRect: NSRect) {
-      NSColor.systemBlue.withAlphaComponent(0.9).setFill()
-      NSBezierPath(ovalIn: bounds.insetBy(dx: 2, dy: 2)).fill()
+      let path = NSBezierPath(ovalIn: bounds.insetBy(dx: 2, dy: 2))
+      path.lineWidth = 2
+      let shadow = NSShadow()
+      shadow.shadowColor = NSColor.black.withAlphaComponent(0.65)
+      shadow.shadowBlurRadius = 2
+      shadow.shadowOffset = .zero
+      shadow.set()
+      NSColor.white.withAlphaComponent(0.9).setStroke()
+      path.stroke()
+      NSColor.systemBlue.setStroke()
+      path.stroke()
     }
   }
+  private let panelFactory: (NSRect) -> NSPanel?
   private var window: NSPanel?
-  private var diameter = 16.0
+  private var diameter = 28.0
   private var lastPoint: Point?
 
-  func show() {
+  init(
+    // The default AppKit initializer is non-failable; the optional factory is a narrow seam so
+    // presentation failure can be exercised without inventing an impossible runtime condition.
+    panelFactory: @escaping (NSRect) -> NSPanel? = { frame in
+      NSPanel(
+        contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered,
+        defer: false)
+    }
+  ) {
+    self.panelFactory = panelFactory
+  }
+
+  @discardableResult
+  func show() -> Bool {
     if window == nil {
-      let panel = NSPanel(
-        contentRect: NSRect(x: 0, y: 0, width: diameter, height: diameter),
-        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-      panel.level = .statusBar
+      guard let panel = panelFactory(NSRect(x: 0, y: 0, width: diameter, height: diameter)) else {
+        return false
+      }
+      panel.level = .floating
       panel.isOpaque = false
       panel.backgroundColor = .clear
       panel.ignoresMouseEvents = true
       panel.hidesOnDeactivate = false
-      panel.contentView = IndicatorView(frame: panel.contentRect(forFrameRect: panel.frame))
+      panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+      panel.contentView = HaloView(frame: panel.contentRect(forFrameRect: panel.frame))
       window = panel
     }
     window?.orderFrontRegardless()
     if let lastPoint { move(to: lastPoint) }
+    return window != nil
   }
 
-  func setSize(_ radius: Double) {
-    diameter = radius * 2
+  func setDiameter(_ diameter: Double) {
+    self.diameter = diameter
     window?.setContentSize(NSSize(width: diameter, height: diameter))
   }
 
@@ -457,7 +482,7 @@ private final class BindingReferencePanelController {
 private final class KeyveerApplicationController: NSObject {
   private let permissions = SystemPermissionProvider()
   private let executor = CoreGraphicsEffectExecutor()
-  private let indicator = IndicatorController()
+  private let cursorHalo = CursorHaloController()
   private let diagnostics = DiagnosticCollector()
   private let runtime = KeyveerRuntime()
   private let runtimeLock = NSLock()
@@ -467,6 +492,7 @@ private final class KeyveerApplicationController: NSObject {
   private var statusItem: NSStatusItem?
   private var bindingReferencePanel: BindingReferencePanelController?
   private var reloadMenuItem: NSMenuItem?
+  private var cursorHaloUnavailableMenuItem: NSMenuItem?
   private var configurationValid = true
   private var configurationError: String?
   private var eventTapStatus: DiagnosticEventTapStatus = .unknown
@@ -549,6 +575,11 @@ private final class KeyveerApplicationController: NSObject {
     let reload = menuItem("Reload Configuration", #selector(reloadConfigurationFromMenu))
     menu.addItem(reload)
     reloadMenuItem = reload
+    let haloUnavailable = NSMenuItem(title: "Cursor Halo: Unavailable", action: nil, keyEquivalent: "")
+    haloUnavailable.isEnabled = false
+    haloUnavailable.isHidden = true
+    menu.addItem(haloUnavailable)
+    cursorHaloUnavailableMenuItem = haloUnavailable
     menu.addItem(menuItem("Copy Diagnostic Summary", #selector(copyDiagnostics)))
     menu.addItem(.separator())
     menu.addItem(menuItem("Quit Keyveer", #selector(quit)))
@@ -742,9 +773,9 @@ private final class KeyveerApplicationController: NSObject {
     diagnostics.record(response)
     let uiEffects = response.effects.filter { effect in
       switch effect {
-      case .capabilitiesChanged, .freeModeStatusChanged, .modeChanged, .indicator, .pointerMoved,
+      case .capabilitiesChanged, .freeModeStatusChanged, .modeChanged, .cursorHalo, .pointerMoved,
         .configurationAccepted,
-        .indicatorSizeChanged, .pointerPositionChanged, .configurationRejected,
+        .cursorHaloDiameterChanged, .pointerPositionChanged, .configurationRejected,
         .eventTapShouldBeReenabled, .diagnostic:
         return true
       default: return false
@@ -775,10 +806,20 @@ private final class KeyveerApplicationController: NSObject {
         )
       case .modeChanged(let isEnabled):
         logger.info("Free mode changed: enabled=\(isEnabled)")
-      case .indicator(let isVisible): isVisible ? indicator.show() : indicator.hide()
-      case .indicatorSizeChanged(let size): indicator.setSize(size)
-      case .pointerPositionChanged(to: let point): indicator.move(to: point)
-      case .pointerMoved(to: let point, buttons: _): indicator.move(to: point)
+      case .cursorHalo(let isVisible):
+        if isVisible {
+          if cursorHalo.show() {
+            cursorHaloUnavailableMenuItem?.isHidden = true
+          } else {
+            apply(runtimeResponse(for: .cursorHaloPresentationFailed))
+          }
+        } else {
+          cursorHalo.hide()
+          cursorHaloUnavailableMenuItem?.isHidden = true
+        }
+      case .cursorHaloDiameterChanged(let diameter): cursorHalo.setDiameter(diameter)
+      case .pointerPositionChanged(to: let point): cursorHalo.move(to: point)
+      case .pointerMoved(to: let point, buttons: _): cursorHalo.move(to: point)
       case .configurationAccepted:
         configurationValid = true
         configurationError = nil
@@ -798,6 +839,9 @@ private final class KeyveerApplicationController: NSObject {
       case .diagnostic(.eventTapRecoveryFailed):
         eventTapStatus = .recoveryFailed
         logger.error("Event tap recovery failed; free mode remains disabled")
+      case .diagnostic(.cursorHaloUnavailable):
+        cursorHaloUnavailableMenuItem?.isHidden = false
+        logger.error("Cursor halo presentation unavailable; free mode remains enabled")
       case .diagnostic(.safetyExit):
         logger.notice("Safety cleanup completed")
       case .diagnostic(.configurationRejected):

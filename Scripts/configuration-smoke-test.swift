@@ -123,11 +123,11 @@ func run() -> Int32 {
       return 1
     }
     let generated = try readObject()
-    guard let schemaVersion = generated["schemaVersion"] as? Int, schemaVersion == 2 else {
-      print("FAIL: generated configuration has no schemaVersion 2.")
+    guard let schemaVersion = generated["schemaVersion"] as? Int, schemaVersion == 3 else {
+      print("FAIL: generated configuration has no schemaVersion 3.")
       return 1
     }
-    print("PASS: first launch generated config.json with schemaVersion 2.")
+    print("PASS: first launch generated config.json with schemaVersion 3.")
     Thread.sleep(forTimeInterval: 1)
 
     var valid = generated

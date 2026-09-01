@@ -100,7 +100,7 @@ private func verifyHorizontalMultiDisplayMotion() -> Bool {
   return true
 }
 
-private func indicatorCenter() -> CGPoint? {
+private func cursorHaloCenter() -> CGPoint? {
   guard
     let process = NSRunningApplication.runningApplications(
       withBundleIdentifier: "com.reinerlau.keyveer").first
@@ -131,16 +131,25 @@ private func displacement(for keys: [CGKeyCode], duration: TimeInterval = 0.35) 
   return end.x - start.x
 }
 
+private func waitForHalo(_ expectedVisible: Bool) -> Bool {
+  for _ in 0..<20 {
+    if (cursorHaloCenter() != nil) == expectedVisible { return true }
+    Thread.sleep(forTimeInterval: 0.05)
+  }
+  return false
+}
+
 func run() -> Int32 {
   print("Starting real-app motion smoke test; assuming free mode is off.")
   guard verifyHorizontalMultiDisplayMotion() else { return 1 }
   tapOption()
 
-  guard indicatorCenter() == nil else {
-    fputs("FAIL: the blue indicator is still visible after entering free mode.\n", stderr)
+  guard waitForHalo(true) else {
+    fputs("FAIL: the cursor halo is not visible after entering free mode.\n", stderr)
     tapOption()
     return 1
   }
+  print("PASS: cursor halo is visible during free mode.")
 
   let base = displacement(for: [lKey])
   tapOption()
@@ -153,6 +162,11 @@ func run() -> Int32 {
   tapOption()
   let fastest = displacement(for: [sKey, dKey, fKey, lKey])
   tapOption()
+
+  guard waitForHalo(false) else {
+    fputs("FAIL: the cursor halo remained visible after leaving free mode.\n", stderr)
+    return 1
+  }
 
   print(String(format: "Measured rightward displacement: A=%.1f, base=%.1f, S=%.1f, S+D+F=%.1f pt", precision, base, fast, fastest))
   guard precision > 0, base > precision * 1.8, fast > base * 1.8, fastest > fast * 1.8 else {
