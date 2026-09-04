@@ -144,7 +144,9 @@ private final class CoreGraphicsEffectExecutor {
       guard
         let event = CGEvent(
           scrollWheelEvent2Source: CGEventSource(stateID: .combinedSessionState), units: .pixel,
-          wheelCount: 2, wheel1: Int32(pixelY), wheel2: Int32(pixelX), wheel3: 0)
+          wheelCount: 2, wheel1: Int32(pixelY),
+          wheel2: Int32(ScrollEventMapping.coreGraphicsWheel2Value(forHorizontalPixelDelta: pixelX)),
+          wheel3: 0)
       else { return }
       event.setIntegerValueField(.eventSourceUserData, value: synthesizedEventMarker)
       event.post(tap: .cghidEventTap)

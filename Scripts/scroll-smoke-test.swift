@@ -110,8 +110,9 @@ func run() -> Int32 {
   let bindings: [(name: String, key: CGKeyCode, verticalSign: Int, horizontalSign: Int)] = [
     ("M/up", mKey, 1, 0),
     ("comma/down", commaKey, -1, 0),
-    ("period/left", periodKey, 0, -1),
-    ("slash/right", slashKey, 0, 1),
+    // Core Graphics' raw wheel-2 sign is opposite to the logical horizontal scroll direction.
+    ("period/left", periodKey, 0, 1),
+    ("slash/right", slashKey, 0, -1),
   ]
   for binding in bindings {
     capture.clear()

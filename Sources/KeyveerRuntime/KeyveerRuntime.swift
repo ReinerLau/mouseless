@@ -538,6 +538,13 @@ public enum RuntimeEffect: Equatable, Sendable {
   case diagnostic(Diagnostic)
 }
 
+/// Converts the runtime's horizontal scroll direction to Core Graphics' wheel-2 direction.
+public enum ScrollEventMapping {
+  public static func coreGraphicsWheel2Value(forHorizontalPixelDelta delta: Int) -> Int {
+    -delta
+  }
+}
+
 public enum FreeModeStatus: String, Equatable, Sendable {
   case available
   case enabled

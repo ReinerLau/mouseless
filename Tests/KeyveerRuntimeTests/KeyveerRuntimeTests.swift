@@ -1160,6 +1160,11 @@ final class KeyveerRuntimeTests: XCTestCase {
     }
   }
 
+  func testCoreGraphicsHorizontalScrollAxisUsesTheExpectedDirection() {
+    XCTAssertEqual(ScrollEventMapping.coreGraphicsWheel2Value(forHorizontalPixelDelta: 120), -120)
+    XCTAssertEqual(ScrollEventMapping.coreGraphicsWheel2Value(forHorizontalPixelDelta: -120), 120)
+  }
+
   func testScrollUsesQuarterPrecisionAndStacksThreeFourTimesFastKeys() throws {
     let keySets: [[Key]] = [[], [.s], [.d], [.f], [.s, .d], [.s, .f], [.d, .f], [.s, .d, .f]]
 
