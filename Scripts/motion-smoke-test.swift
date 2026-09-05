@@ -100,23 +100,59 @@ private func verifyHorizontalMultiDisplayMotion() -> Bool {
   return true
 }
 
-private func cursorHaloCenter() -> CGPoint? {
+private func onScreenKeyveerWindows() -> [[String: Any]] {
   guard
     let process = NSRunningApplication.runningApplications(
       withBundleIdentifier: "com.reinerlau.keyveer").first
-  else { return nil }
-  let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]]
-  return windows?.compactMap { window in
+  else { return [] }
+  return (CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? [])
+    .filter { ($0[kCGWindowOwnerPID as String] as? Int) == Int(process.processIdentifier) }
+}
+
+private func keyveerWindowNumbers() -> Set<Int> {
+  Set(onScreenKeyveerWindows().compactMap { $0[kCGWindowNumber as String] as? Int })
+}
+
+private func cursorMarkerWindowCenter(excluding windowNumbers: Set<Int>) -> CGPoint? {
+  return markerWindows(excluding: windowNumbers).compactMap { window in
     guard
-      let ownerPID = window[kCGWindowOwnerPID as String] as? Int,
-      ownerPID == Int(process.processIdentifier),
-      let bounds = window[kCGWindowBounds as String] as? [String: CGFloat],
-      let x = bounds["X"], let y = bounds["Y"],
-      let width = bounds["Width"], let height = bounds["Height"],
-      width >= 8, width <= 32, height >= 8, height <= 32
+      let bounds = window[kCGWindowBounds as String] as? [String: Any],
+      let x = bounds["X"] as? CGFloat, let y = bounds["Y"] as? CGFloat,
+      let width = bounds["Width"] as? CGFloat, let height = bounds["Height"] as? CGFloat
     else { return nil }
     return CGPoint(x: x + width / 2, y: y + height / 2)
   }.first
+}
+
+private func markerWindows(excluding windowNumbers: Set<Int>) -> [[String: Any]] {
+  onScreenKeyveerWindows().filter { window in
+    guard
+      let windowNumber = window[kCGWindowNumber as String] as? Int,
+      !windowNumbers.contains(windowNumber),
+      let bounds = window[kCGWindowBounds as String] as? [String: Any],
+      let width = bounds["Width"] as? CGFloat, let height = bounds["Height"] as? CGFloat,
+      width >= 8, width <= 64, height >= 8, height <= 64
+    else { return false }
+    return true
+  }
+}
+
+private func newKeyveerWindowCount(excluding windowNumbers: Set<Int>) -> Int {
+  onScreenKeyveerWindows().filter { window in
+    guard let windowNumber = window[kCGWindowNumber as String] as? Int else { return false }
+    return !windowNumbers.contains(windowNumber)
+  }.count
+}
+
+private func verifyCursorTrail(excluding windowNumbers: Set<Int>) -> Bool {
+  movePointerToTestOrigin()
+  Thread.sleep(forTimeInterval: 0.1)
+  postKey(lKey, isDown: true)
+  Thread.sleep(forTimeInterval: 0.12)
+  let trailWindowCount = newKeyveerWindowCount(excluding: windowNumbers)
+  postKey(lKey, isDown: false)
+  Thread.sleep(forTimeInterval: 0.35)
+  return trailWindowCount >= 2
 }
 
 private func displacement(for keys: [CGKeyCode], duration: TimeInterval = 0.35) -> Double {
@@ -131,9 +167,10 @@ private func displacement(for keys: [CGKeyCode], duration: TimeInterval = 0.35) 
   return end.x - start.x
 }
 
-private func waitForHalo(_ expectedVisible: Bool) -> Bool {
+private func waitForCursorMarker(_ expectedVisible: Bool, excluding windowNumbers: Set<Int>) -> Bool {
   for _ in 0..<20 {
-    if (cursorHaloCenter() != nil) == expectedVisible { return true }
+    let markerVisible = cursorMarkerWindowCenter(excluding: windowNumbers) != nil
+    if markerVisible == expectedVisible { return true }
     Thread.sleep(forTimeInterval: 0.05)
   }
   return false
@@ -142,14 +179,24 @@ private func waitForHalo(_ expectedVisible: Bool) -> Bool {
 func run() -> Int32 {
   print("Starting real-app motion smoke test; assuming free mode is off.")
   guard verifyHorizontalMultiDisplayMotion() else { return 1 }
+  movePointerToTestOrigin()
+  Thread.sleep(forTimeInterval: 0.1)
+  let baselineWindowNumbers = keyveerWindowNumbers()
   tapOption()
 
-  guard waitForHalo(true) else {
-    fputs("FAIL: the cursor halo is not visible after entering free mode.\n", stderr)
+  guard waitForCursorMarker(true, excluding: baselineWindowNumbers) else {
+    fputs("FAIL: the cursor marker is not visible after entering free mode.\n", stderr)
     tapOption()
     return 1
   }
-  print("PASS: cursor halo is visible during free mode.")
+  print("PASS: the blue cursor marker is visible during free mode.")
+
+  guard verifyCursorTrail(excluding: baselineWindowNumbers) else {
+    fputs("FAIL: pointer movement did not produce a visible marker trail.\n", stderr)
+    tapOption()
+    return 1
+  }
+  print("PASS: pointer movement produces a fading marker trail.")
 
   let base = displacement(for: [lKey])
   tapOption()
@@ -163,8 +210,8 @@ func run() -> Int32 {
   let fastest = displacement(for: [sKey, dKey, fKey, lKey])
   tapOption()
 
-  guard waitForHalo(false) else {
-    fputs("FAIL: the cursor halo remained visible after leaving free mode.\n", stderr)
+  guard waitForCursorMarker(false, excluding: baselineWindowNumbers) else {
+    fputs("FAIL: the cursor marker remained visible after leaving free mode.\n", stderr)
     return 1
   }
 

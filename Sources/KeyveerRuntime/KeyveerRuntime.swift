@@ -352,6 +352,16 @@ public struct KeyboardEvent: Equatable, Sendable {
     self.isAutoRepeat = isAutoRepeat
     self.modifiers = modifiers
   }
+
+  public static func modifierChanged(
+    key: Key, timestamp: TimeInterval, modifiers: KeyboardModifiers
+  ) -> KeyboardEvent? {
+    guard let modifier = KeyboardModifiers.modifier(for: key) else { return nil }
+    let phase: KeyboardEventPhase = modifiers.contains(modifier) ? .down : .up
+    return KeyboardEvent(
+      key: key, phase: phase, timestamp: timestamp, isAutoRepeat: false,
+      modifiers: modifiers)
+  }
 }
 
 public enum EventDisposition: Equatable, Sendable {
@@ -364,7 +374,7 @@ public enum Diagnostic: Equatable, Sendable {
   case eventTapDisabled
   case eventTapRecovered
   case eventTapRecoveryFailed
-  case cursorHaloUnavailable
+  case cursorMarkerUnavailable
   case configurationAccepted
   case configurationRejected
 }
@@ -395,7 +405,7 @@ public struct DiagnosticCounters: Equatable, Sendable {
   public var eventTapRecoveryFailureCount: Int
   public var configurationAcceptedCount: Int
   public var configurationRejectedCount: Int
-  public var cursorHaloPresentationFailureCount: Int
+  public var cursorMarkerPresentationFailureCount: Int
   public var pointerEffectCount: Int
   public var mouseButtonEffectCount: Int
   public var scrollEffectCount: Int
@@ -407,7 +417,7 @@ public struct DiagnosticCounters: Equatable, Sendable {
     modeChangeCount: Int = 0, safetyExitCount: Int = 0, eventTapDisabledCount: Int = 0,
     eventTapRecoveryCount: Int = 0, eventTapRecoveryFailureCount: Int = 0,
     configurationAcceptedCount: Int = 0, configurationRejectedCount: Int = 0,
-    cursorHaloPresentationFailureCount: Int = 0,
+    cursorMarkerPresentationFailureCount: Int = 0,
     pointerEffectCount: Int = 0, mouseButtonEffectCount: Int = 0, scrollEffectCount: Int = 0
   ) {
     self.callbackCount = callbackCount
@@ -422,7 +432,7 @@ public struct DiagnosticCounters: Equatable, Sendable {
     self.eventTapRecoveryFailureCount = eventTapRecoveryFailureCount
     self.configurationAcceptedCount = configurationAcceptedCount
     self.configurationRejectedCount = configurationRejectedCount
-    self.cursorHaloPresentationFailureCount = cursorHaloPresentationFailureCount
+    self.cursorMarkerPresentationFailureCount = cursorMarkerPresentationFailureCount
     self.pointerEffectCount = pointerEffectCount
     self.mouseButtonEffectCount = mouseButtonEffectCount
     self.scrollEffectCount = scrollEffectCount
@@ -460,7 +470,7 @@ public struct DiagnosticCounters: Equatable, Sendable {
       case .diagnostic(.eventTapRecoveryFailed): eventTapRecoveryFailureCount += 1
       case .diagnostic(.configurationAccepted): configurationAcceptedCount += 1
       case .diagnostic(.configurationRejected): configurationRejectedCount += 1
-      case .diagnostic(.cursorHaloUnavailable): cursorHaloPresentationFailureCount += 1
+      case .diagnostic(.cursorMarkerUnavailable): cursorMarkerPresentationFailureCount += 1
       default: break
       }
     }
@@ -509,7 +519,7 @@ public struct DiagnosticSummary: Equatable, Sendable {
       "eventTapRecoveryFailures: \(counters.eventTapRecoveryFailureCount)",
       "configurationAccepted: \(counters.configurationAcceptedCount)",
       "configurationRejected: \(counters.configurationRejectedCount)",
-      "cursorHaloPresentationFailures: \(counters.cursorHaloPresentationFailureCount)",
+      "cursorMarkerPresentationFailures: \(counters.cursorMarkerPresentationFailureCount)",
       "pointerEffects: \(counters.pointerEffectCount)",
       "mouseButtonEffects: \(counters.mouseButtonEffectCount)",
       "scrollEffects: \(counters.scrollEffectCount)",
@@ -526,8 +536,6 @@ public enum RuntimeEffect: Equatable, Sendable {
   case capabilitiesChanged(PermissionState)
   case freeModeStatusChanged(FreeModeStatus)
   case modeChanged(isEnabled: Bool)
-  case cursorHalo(isVisible: Bool)
-  case cursorHaloDiameterChanged(diameter: Double)
   case pointerPositionChanged(to: Point)
   case pointerMoved(to: Point, buttons: Set<MouseButton>)
   case mouseButton(MouseButton, ButtonPhase)
@@ -606,7 +614,7 @@ public struct RuntimeEvent {
     case eventTapDisabled
     case eventTapReenabled
     case eventTapRecoveryFailed
-    case cursorHaloPresentationFailed
+    case cursorMarkerPresentationFailed
     case configuration(Data)
     case shutdown
   }
@@ -674,7 +682,8 @@ public struct RuntimeEvent {
 
   public static let eventTapRecoveryFailed = RuntimeEvent(kind: .eventTapRecoveryFailed)
 
-  public static let cursorHaloPresentationFailed = RuntimeEvent(kind: .cursorHaloPresentationFailed)
+  public static let cursorMarkerPresentationFailed = RuntimeEvent(
+    kind: .cursorMarkerPresentationFailed)
 
   public static func configuration(_ data: Data) -> RuntimeEvent {
     RuntimeEvent(kind: .configuration(data))
@@ -846,26 +855,6 @@ private struct LegacyIndicatorSettings: Codable, Equatable, Sendable {
   }
 }
 
-public struct CursorHaloSettings: Codable, Equatable, Sendable {
-  public var enabled: Bool
-  public var diameter: Double
-
-  public init(enabled: Bool = true, diameter: Double = 28) {
-    self.enabled = enabled
-    self.diameter = diameter
-  }
-
-  private enum CodingKeys: String, CodingKey, CaseIterable { case enabled, diameter }
-
-  public init(from decoder: Decoder) throws {
-    let container = try decoder.container(keyedBy: CodingKeys.self)
-    try rejectUnknownKeys(decoder, allowed: CodingKeys.allCases.map(\.stringValue))
-    self.init(
-      enabled: try container.decode(Bool.self, forKey: .enabled),
-      diameter: try container.decode(Double.self, forKey: .diameter))
-  }
-}
-
 private struct LegacyKeyBindings: Codable {
   let toggle: String
   let escape: String
@@ -934,23 +923,21 @@ public struct RuntimeConfiguration: Codable, Equatable, Sendable {
   public var movement: MotionSettings
   public var scrolling: ScrollSettings
   public var optionTapMilliseconds: Double
-  public var cursorHalo: CursorHaloSettings
 
   public init(
     schemaVersion: Int = 3, bindings: KeyBindings = KeyBindings(),
     movement: MotionSettings = MotionSettings(), scrolling: ScrollSettings = ScrollSettings(),
-    optionTapMilliseconds: Double = 250, cursorHalo: CursorHaloSettings = CursorHaloSettings()
+    optionTapMilliseconds: Double = 250
   ) {
     self.schemaVersion = schemaVersion
     self.bindings = bindings
     self.movement = movement
     self.scrolling = scrolling
     self.optionTapMilliseconds = optionTapMilliseconds
-    self.cursorHalo = cursorHalo
   }
 
   private enum CodingKeys: String, CodingKey, CaseIterable {
-    case schemaVersion, bindings, movement, scrolling, optionTapMilliseconds, cursorHalo
+    case schemaVersion, bindings, movement, scrolling, optionTapMilliseconds
   }
 
   private enum DecodingKeys: String, CodingKey, CaseIterable {
@@ -978,8 +965,7 @@ public struct RuntimeConfiguration: Codable, Equatable, Sendable {
     case 2:
       self.init(
         schemaVersion: 3, bindings: try container.decode(KeyBindings.self, forKey: .bindings),
-        movement: movement, scrolling: scrolling, optionTapMilliseconds: optionTapMilliseconds,
-        cursorHalo: CursorHaloSettings())
+        movement: movement, scrolling: scrolling, optionTapMilliseconds: optionTapMilliseconds)
       _ = legacyIndicator
     case 3:
       guard !container.contains(.indicator) else {
@@ -987,8 +973,7 @@ public struct RuntimeConfiguration: Codable, Equatable, Sendable {
       }
       self.init(
         schemaVersion: 3, bindings: try container.decode(KeyBindings.self, forKey: .bindings),
-        movement: movement, scrolling: scrolling, optionTapMilliseconds: optionTapMilliseconds,
-        cursorHalo: try container.decode(CursorHaloSettings.self, forKey: .cursorHalo))
+        movement: movement, scrolling: scrolling, optionTapMilliseconds: optionTapMilliseconds)
     default:
       throw ConfigurationError.unsupportedSchemaVersion(schemaVersion)
     }
@@ -1012,8 +997,6 @@ public struct RuntimeConfiguration: Codable, Equatable, Sendable {
     try validate(scrolling.fastMultiplier, named: "scrolling.fastMultiplier", range: 1...10)
     try validate(
       scrolling.smoothingMilliseconds, named: "scrolling.smoothingMilliseconds", range: 1...1_000)
-    try validate(cursorHalo.diameter, named: "cursorHalo.diameter", range: 4...200)
-
     let activation = Key(configurationName: bindings.activation)
     guard activation == .leftOption || activation == .rightOption else {
       throw ConfigurationError.invalidActivationKey(bindings.activation)
@@ -1349,9 +1332,9 @@ public final class KeyveerRuntime {
       effects.append(.diagnostic(.eventTapRecoveryFailed))
       effects.append(contentsOf: freeModeStatusEffects(changedFrom: previousStatus))
       return RuntimeResponse(disposition: .passThrough, effects: effects)
-    case .cursorHaloPresentationFailed:
+    case .cursorMarkerPresentationFailed:
       return RuntimeResponse(
-        disposition: .passThrough, effects: [.diagnostic(.cursorHaloUnavailable)])
+        disposition: .passThrough, effects: [.diagnostic(.cursorMarkerUnavailable)])
     case .configuration(let data):
       do {
         let decoded = try JSONDecoder().decode(RuntimeConfiguration.self, from: data).validated()
@@ -1372,10 +1355,6 @@ public final class KeyveerRuntime {
         var effects = releasedButtons
         effects.append(.configurationAccepted)
         effects.append(.diagnostic(.configurationAccepted))
-        if modeEnabled {
-          effects.append(.cursorHaloDiameterChanged(diameter: decoded.cursorHalo.diameter))
-          effects.append(.cursorHalo(isVisible: decoded.cursorHalo.enabled))
-        }
         return RuntimeResponse(
           disposition: .passThrough,
           effects: effects)
@@ -1519,8 +1498,6 @@ public final class KeyveerRuntime {
       scrollVelocity = Point(x: 0, y: 0)
       var effects: [RuntimeEffect] = [
         .modeChanged(isEnabled: true),
-        .cursorHaloDiameterChanged(diameter: configuration.cursorHalo.diameter),
-        .cursorHalo(isVisible: configuration.cursorHalo.enabled),
       ]
       effects.append(contentsOf: freeModeStatusEffects(changedFrom: previousStatus))
       return RuntimeResponse(disposition: .passThrough, effects: effects)
@@ -1596,7 +1573,6 @@ public final class KeyveerRuntime {
     if modeEnabled {
       modeEnabled = false
       effects.append(.modeChanged(isEnabled: false))
-      effects.append(.cursorHalo(isVisible: false))
     }
     if emitDiagnostic || !effects.isEmpty { effects.append(.diagnostic(.safetyExit)) }
     effects.append(contentsOf: freeModeStatusEffects(changedFrom: previousStatus))

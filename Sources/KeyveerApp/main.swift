@@ -316,30 +316,66 @@ private func eventTapCallback(
     type: type, event: event)
 }
 
-private final class CursorHaloController {
-  private final class HaloView: NSView {
+private final class CursorMarkerController {
+  private struct TrailPoint {
+    let point: Point
+    let timestamp: TimeInterval
+  }
+
+  private struct TrailSegment {
+    let start: CGPoint
+    let control1: CGPoint
+    let control2: CGPoint
+    let end: CGPoint
+    let alpha: CGFloat
+  }
+
+  private final class MarkerView: NSView {
     override func draw(_ dirtyRect: NSRect) {
-      let path = NSBezierPath(ovalIn: bounds.insetBy(dx: 2, dy: 2))
-      path.lineWidth = 2
-      let shadow = NSShadow()
-      shadow.shadowColor = NSColor.black.withAlphaComponent(0.65)
-      shadow.shadowBlurRadius = 2
-      shadow.shadowOffset = .zero
-      shadow.set()
-      NSColor.white.withAlphaComponent(0.9).setStroke()
-      path.stroke()
-      NSColor.systemBlue.setStroke()
-      path.stroke()
+      NSColor.black.withAlphaComponent(0.45).setFill()
+      NSBezierPath(ovalIn: bounds).fill()
+      NSColor.systemBlue.setFill()
+      NSBezierPath(ovalIn: bounds.insetBy(dx: 1, dy: 1)).fill()
     }
   }
+
+  private final class TrailView: NSView {
+    var segments: [TrailSegment] = [] {
+      didSet { needsDisplay = true }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+      guard !segments.isEmpty else { return }
+
+      NSGraphicsContext.saveGraphicsState()
+      defer { NSGraphicsContext.restoreGraphicsState() }
+
+      for segment in segments {
+        let path = NSBezierPath()
+        path.move(to: segment.start)
+        path.curve(
+          to: segment.end, controlPoint1: segment.control1, controlPoint2: segment.control2)
+        path.lineWidth = 10
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        NSColor.systemBlue.withAlphaComponent(segment.alpha).setStroke()
+        path.stroke()
+      }
+    }
+  }
+
   private let panelFactory: (NSRect) -> NSPanel?
   private var window: NSPanel?
-  private var diameter = 28.0
+  private var trailWindow: NSPanel?
+  private var trail: [TrailPoint] = []
+  private let diameter: CGFloat = 10
+  private let offset: CGFloat = 12
+  private let trailDuration: TimeInterval = 0.45
+  private let maximumTrailPoints = 20
   private var lastPoint: Point?
+  private var isShown = false
 
   init(
-    // The default AppKit initializer is non-failable; the optional factory is a narrow seam so
-    // presentation failure can be exercised without inventing an impossible runtime condition.
     panelFactory: @escaping (NSRect) -> NSPanel? = { frame in
       NSPanel(
         contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered,
@@ -352,34 +388,145 @@ private final class CursorHaloController {
   @discardableResult
   func show() -> Bool {
     if window == nil {
-      guard let panel = panelFactory(NSRect(x: 0, y: 0, width: diameter, height: diameter)) else {
+      guard let panel = makePanel() else {
+        logger.error("Could not create cursor marker window")
         return false
       }
-      panel.level = .floating
-      panel.isOpaque = false
-      panel.backgroundColor = .clear
-      panel.ignoresMouseEvents = true
-      panel.hidesOnDeactivate = false
-      panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
-      panel.contentView = HaloView(frame: panel.contentRect(forFrameRect: panel.frame))
       window = panel
     }
     window?.orderFrontRegardless()
+    guard window?.isVisible == true else {
+      logger.error("Could not show cursor marker window")
+      window?.orderOut(nil)
+      return false
+    }
+    isShown = true
     if let lastPoint { move(to: lastPoint) }
-    return window != nil
+    return true
   }
 
-  func setDiameter(_ diameter: Double) {
-    self.diameter = diameter
-    window?.setContentSize(NSSize(width: diameter, height: diameter))
+  func hide() {
+    isShown = false
+    window?.orderOut(nil)
+    trailWindow?.orderOut(nil)
+    (trailWindow?.contentView as? TrailView)?.segments = []
+    trail.removeAll()
   }
 
-  func hide() { window?.orderOut(nil) }
   func move(to point: Point) {
+    let now = CACurrentMediaTime()
+    if let lastPoint, lastPoint != point {
+      trail.append(TrailPoint(point: lastPoint, timestamp: now))
+    }
     lastPoint = point
-    guard window != nil else { return }
+    render(at: now)
+  }
+
+  func tick() {
+    render(at: CACurrentMediaTime())
+  }
+
+  private func makePanel() -> NSPanel? {
+    guard let panel = panelFactory(NSRect(x: 0, y: 0, width: diameter, height: diameter)) else {
+      return nil
+    }
+    configure(panel)
+    panel.contentView = MarkerView(frame: panel.contentRect(forFrameRect: panel.frame))
+    return panel
+  }
+
+  private func makeTrailPanel() -> NSPanel? {
+    let frame = NSScreen.screens.map(\.frame).reduce(CGRect.null) { $0.union($1) }
+    guard !frame.isNull, !frame.isEmpty, let panel = panelFactory(frame) else {
+      return nil
+    }
+    configure(panel)
+    panel.contentView = TrailView(frame: panel.contentRect(forFrameRect: panel.frame))
+    return panel
+  }
+
+  private func configure(_ panel: NSPanel) {
+    panel.level = .statusBar
+    panel.isOpaque = false
+    panel.backgroundColor = .clear
+    panel.ignoresMouseEvents = true
+    panel.hidesOnDeactivate = false
+    panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+  }
+
+  private func render(at timestamp: TimeInterval) {
+    guard isShown, let window else { return }
+    trail.removeAll { timestamp - $0.timestamp >= trailDuration }
+    if trail.count > maximumTrailPoints {
+      trail.removeFirst(trail.count - maximumTrailPoints)
+    }
+
+    if trail.isEmpty {
+      trailWindow?.orderOut(nil)
+      (trailWindow?.contentView as? TrailView)?.segments = []
+    } else {
+      if trailWindow == nil {
+        guard let panel = makeTrailPanel() else {
+          logger.error("Could not create cursor trail window")
+          trailWindow = nil
+          return
+        }
+        trailWindow = panel
+      }
+      if let trailWindow, let trailView = trailWindow.contentView as? TrailView {
+        trailView.segments = makeTrailSegments(at: timestamp, origin: trailWindow.frame.origin)
+        trailWindow.orderFrontRegardless()
+      }
+    }
+
+    if let lastPoint {
+      move(window, to: lastPoint)
+    }
+    window.alphaValue = 1
+    window.orderFrontRegardless()
+  }
+
+  private func makeTrailSegments(at timestamp: TimeInterval, origin: NSPoint) -> [TrailSegment] {
+    guard let lastPoint else { return [] }
+
+    let points = trail.map { trailPoint in
+      let age = max(0, timestamp - trailPoint.timestamp)
+      let alpha = CGFloat(max(0, 1 - age / trailDuration) * 0.65)
+      return (point: markerCenter(for: trailPoint.point), alpha: alpha)
+    } + [(point: markerCenter(for: lastPoint), alpha: CGFloat(0.65))]
+
+    guard points.count >= 2 else { return [] }
+
+    return (0..<(points.count - 1)).map { index in
+      let previous = points[max(index - 1, 0)].point
+      let start = points[index].point
+      let end = points[index + 1].point
+      let next = points[min(index + 2, points.count - 1)].point
+      let control1 = CGPoint(
+        x: start.x + (end.x - previous.x) / 6,
+        y: start.y + (end.y - previous.y) / 6)
+      let control2 = CGPoint(
+        x: end.x - (next.x - start.x) / 6,
+        y: end.y - (next.y - start.y) / 6)
+      return TrailSegment(
+        start: CGPoint(x: start.x - origin.x, y: start.y - origin.y),
+        control1: CGPoint(x: control1.x - origin.x, y: control1.y - origin.y),
+        control2: CGPoint(x: control2.x - origin.x, y: control2.y - origin.y),
+        end: CGPoint(x: end.x - origin.x, y: end.y - origin.y),
+        alpha: min(points[index].alpha, points[index + 1].alpha))
+    }
+  }
+
+  private func markerCenter(for point: Point) -> CGPoint {
     let cocoa = cocoaPoint(fromQuartz: CGPoint(x: point.x, y: point.y))
-    window?.setFrameOrigin(NSPoint(x: cocoa.x - diameter / 2, y: cocoa.y - diameter / 2))
+    return CGPoint(
+      x: cocoa.x + offset + diameter / 2,
+      y: cocoa.y - offset - diameter / 2)
+  }
+
+  private func move(_ window: NSPanel, to point: Point) {
+    let cocoa = cocoaPoint(fromQuartz: CGPoint(x: point.x, y: point.y))
+    window.setFrameOrigin(NSPoint(x: cocoa.x + offset, y: cocoa.y - diameter - offset))
   }
 }
 
@@ -484,7 +631,7 @@ private final class BindingReferencePanelController {
 private final class KeyveerApplicationController: NSObject {
   private let permissions = SystemPermissionProvider()
   private let executor = CoreGraphicsEffectExecutor()
-  private let cursorHalo = CursorHaloController()
+  private let cursorMarker = CursorMarkerController()
   private let diagnostics = DiagnosticCollector()
   private let runtime = KeyveerRuntime()
   private let runtimeLock = NSLock()
@@ -494,7 +641,6 @@ private final class KeyveerApplicationController: NSObject {
   private var statusItem: NSStatusItem?
   private var bindingReferencePanel: BindingReferencePanelController?
   private var reloadMenuItem: NSMenuItem?
-  private var cursorHaloUnavailableMenuItem: NSMenuItem?
   private var configurationValid = true
   private var configurationError: String?
   private var eventTapStatus: DiagnosticEventTapStatus = .unknown
@@ -559,6 +705,7 @@ private final class KeyveerApplicationController: NSObject {
     for observer in applicationObservers { NotificationCenter.default.removeObserver(observer) }
     applicationObservers.removeAll()
     apply(runtimeResponse(for: .shutdown))
+    cursorMarker.hide()
     executor.releaseAllButtons(waitUntilPosted: true)
   }
 
@@ -577,11 +724,6 @@ private final class KeyveerApplicationController: NSObject {
     let reload = menuItem("Reload Configuration", #selector(reloadConfigurationFromMenu))
     menu.addItem(reload)
     reloadMenuItem = reload
-    let haloUnavailable = NSMenuItem(title: "Cursor Halo: Unavailable", action: nil, keyEquivalent: "")
-    haloUnavailable.isEnabled = false
-    haloUnavailable.isHidden = true
-    menu.addItem(haloUnavailable)
-    cursorHaloUnavailableMenuItem = haloUnavailable
     menu.addItem(menuItem("Copy Diagnostic Summary", #selector(copyDiagnostics)))
     menu.addItem(.separator())
     menu.addItem(menuItem("Quit Keyveer", #selector(quit)))
@@ -681,13 +823,13 @@ private final class KeyveerApplicationController: NSObject {
       let key = key(for: CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode)))
       let timestamp = Double(event.timestamp) / 1_000_000_000
       let modifiers = modifierState(for: event, key: key)
-      response = runtimeResponse(for: .keyboard(
-        KeyboardEvent(
-          key: key,
-          phase: modifierPhase(for: key, modifiers: modifiers),
-          timestamp: timestamp,
-          isAutoRepeat: false,
-          modifiers: modifiers)))
+      if let keyboardEvent = KeyboardEvent.modifierChanged(
+        key: key, timestamp: timestamp, modifiers: modifiers)
+      {
+        response = runtimeResponse(for: .keyboard(keyboardEvent))
+      } else {
+        response = RuntimeResponse(disposition: .passThrough)
+      }
     case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
       response = runtimeResponse(
         for: .pointerMoved(to: Point(x: event.location.x, y: event.location.y)))
@@ -775,9 +917,8 @@ private final class KeyveerApplicationController: NSObject {
     diagnostics.record(response)
     let uiEffects = response.effects.filter { effect in
       switch effect {
-      case .capabilitiesChanged, .freeModeStatusChanged, .modeChanged, .cursorHalo, .pointerMoved,
-        .configurationAccepted,
-        .cursorHaloDiameterChanged, .pointerPositionChanged, .configurationRejected,
+      case .capabilitiesChanged, .freeModeStatusChanged, .modeChanged, .pointerMoved,
+        .configurationAccepted, .pointerPositionChanged, .configurationRejected,
         .eventTapShouldBeReenabled, .diagnostic:
         return true
       default: return false
@@ -807,21 +948,16 @@ private final class KeyveerApplicationController: NSObject {
           "Capabilities changed: accessibility=\(state.accessibility), postEvent=\(state.postEvent)"
         )
       case .modeChanged(let isEnabled):
-        logger.info("Free mode changed: enabled=\(isEnabled)")
-      case .cursorHalo(let isVisible):
-        if isVisible {
-          if cursorHalo.show() {
-            cursorHaloUnavailableMenuItem?.isHidden = true
-          } else {
-            apply(runtimeResponse(for: .cursorHaloPresentationFailed))
+        logger.notice("Free mode changed: enabled=\(isEnabled)")
+        if isEnabled {
+          if !cursorMarker.show() {
+            apply(runtimeResponse(for: .cursorMarkerPresentationFailed))
           }
         } else {
-          cursorHalo.hide()
-          cursorHaloUnavailableMenuItem?.isHidden = true
+          cursorMarker.hide()
         }
-      case .cursorHaloDiameterChanged(let diameter): cursorHalo.setDiameter(diameter)
-      case .pointerPositionChanged(to: let point): cursorHalo.move(to: point)
-      case .pointerMoved(to: let point, buttons: _): cursorHalo.move(to: point)
+      case .pointerPositionChanged(to: let point): cursorMarker.move(to: point)
+      case .pointerMoved(to: let point, buttons: _): cursorMarker.move(to: point)
       case .configurationAccepted:
         configurationValid = true
         configurationError = nil
@@ -841,9 +977,8 @@ private final class KeyveerApplicationController: NSObject {
       case .diagnostic(.eventTapRecoveryFailed):
         eventTapStatus = .recoveryFailed
         logger.error("Event tap recovery failed; free mode remains disabled")
-      case .diagnostic(.cursorHaloUnavailable):
-        cursorHaloUnavailableMenuItem?.isHidden = false
-        logger.error("Cursor halo presentation unavailable; free mode remains enabled")
+      case .diagnostic(.cursorMarkerUnavailable):
+        logger.error("Cursor marker unavailable; free mode remains enabled")
       case .diagnostic(.safetyExit):
         logger.notice("Safety cleanup completed")
       case .diagnostic(.configurationRejected):
@@ -859,6 +994,7 @@ private final class KeyveerApplicationController: NSObject {
     let delta = elapsed.isFinite ? max(elapsed, 0) : 0
     lastFrameTime = link.timestamp
     apply(runtimeResponse(for: .frame(deltaTime: delta)))
+    cursorMarker.tick()
     // TCC has no reliable change notification. Poll on every display frame so a permission
     // revocation can end free mode before the next user-visible frame, without touching the tap
     // callback's latency-sensitive path.
@@ -1185,10 +1321,6 @@ private final class KeyveerApplicationController: NSObject {
     return state
   }
 
-  private func modifierPhase(for key: Key, modifiers: KeyboardModifiers) -> KeyboardEventPhase {
-    guard let modifier = KeyboardModifiers.modifier(for: key) else { return .down }
-    return modifiers.contains(modifier) ? .down : .up
-  }
 }
 
 @main

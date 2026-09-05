@@ -151,6 +151,26 @@ final class KeyveerRuntimeTests: XCTestCase {
     XCTAssertEqual(event.modifiers, [.leftCommand, .rightShift])
   }
 
+  func testAmbiguousFlagsChangedKeyCodeDoesNotBecomePrecisionKeyDown() {
+    let event = KeyboardEvent.modifierChanged(key: .a, timestamp: 1, modifiers: [])
+
+    XCTAssertNil(event)
+  }
+
+  func testFlagsChangedBuildsPhysicalModifierLifecycle() {
+    XCTAssertEqual(
+      KeyboardEvent.modifierChanged(
+        key: .leftCommand, timestamp: 1, modifiers: [.leftCommand]),
+      KeyboardEvent(
+        key: .leftCommand, phase: .down, timestamp: 1, isAutoRepeat: false,
+        modifiers: [.leftCommand]))
+    XCTAssertEqual(
+      KeyboardEvent.modifierChanged(key: .leftCommand, timestamp: 2, modifiers: []),
+      KeyboardEvent(
+        key: .leftCommand, phase: .up, timestamp: 2, isAutoRepeat: false,
+        modifiers: []))
+  }
+
   func testCommandAndControlShortcutsPassThroughMappedKeysForEntireLifecycle() {
     let shortcutModifiers: [KeyboardModifiers] = [
       .leftCommand, .rightCommand, .leftControl, .rightControl,
@@ -466,29 +486,23 @@ final class KeyveerRuntimeTests: XCTestCase {
   }
 
   func testAQualifiedLeftOptionTapEntersFreeModeWhenCapabilitiesAreReady() {
-    let runtime = KeyveerRuntime(
-      configuration: RuntimeConfiguration(cursorHalo: CursorHaloSettings(enabled: true)),
-      permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
 
     _ = runtime.handle(.keyDown(.leftOption, at: 0))
     let response = runtime.handle(.keyUp(.leftOption, at: 0.1))
 
     XCTAssertEqual(response.disposition, .passThrough)
     XCTAssertTrue(response.effects.contains(.modeChanged(isEnabled: true)))
-    XCTAssertTrue(response.effects.contains(.cursorHalo(isVisible: true)))
   }
 
   func testModifierChangedLeftOptionTapEntersFreeModeWhenCapabilitiesAreReady() {
-    let runtime = KeyveerRuntime(
-      configuration: RuntimeConfiguration(cursorHalo: CursorHaloSettings(enabled: true)),
-      permissions: .allGranted)
+    let runtime = KeyveerRuntime(permissions: .allGranted)
 
     _ = runtime.handle(.modifierChanged(.leftOption, isPressed: true, at: 0))
     let response = runtime.handle(.modifierChanged(.leftOption, isPressed: false, at: 0.1))
 
     XCTAssertEqual(response.disposition, .passThrough)
     XCTAssertTrue(response.effects.contains(.modeChanged(isEnabled: true)))
-    XCTAssertTrue(response.effects.contains(.cursorHalo(isVisible: true)))
   }
 
   func testLeftOptionTimeoutAndCombinationDoNotToggle() {
@@ -517,7 +531,6 @@ final class KeyveerRuntimeTests: XCTestCase {
     let leftDown = runtime.handle(.keyDown(.leftOption, at: 1))
     XCTAssertEqual(leftDown.disposition, .passThrough)
     XCTAssertTrue(leftDown.effects.contains(.modeChanged(isEnabled: false)))
-    XCTAssertTrue(leftDown.effects.contains(.cursorHalo(isVisible: false)))
     XCTAssertEqual(runtime.handle(.keyUp(.leftOption, at: 1.5)).disposition, .passThrough)
   }
 
@@ -611,7 +624,7 @@ final class KeyveerRuntimeTests: XCTestCase {
     XCTAssertGreaterThan(downPoint.y, 100)
   }
 
-  func testPhysicalPointerMovementProducesACursorHaloPositionUpdate() {
+  func testPhysicalPointerMovementProducesAPointerPositionUpdate() {
     let runtime = KeyveerRuntime(permissions: .allGranted)
     let response = runtime.handle(.pointerMoved(to: Point(x: 240, y: 180)))
 
@@ -1283,7 +1296,7 @@ final class KeyveerRuntimeTests: XCTestCase {
     }))
   }
 
-  func testLegacySchemasMigrateToDefaultOnCursorHaloWithoutRewriting() throws {
+  func testLegacySchemasMigrateWithoutRewriting() throws {
     for schemaVersion in [1, 2] {
       var object = try configurationObject()
       object["schemaVersion"] = schemaVersion
@@ -1299,52 +1312,29 @@ final class KeyveerRuntimeTests: XCTestCase {
       XCTAssertTrue(runtime.handle(.configuration(data)).effects.contains(.configurationAccepted))
       _ = runtime.handle(.keyDown(.leftOption, at: 0))
       let entered = runtime.handle(.keyUp(.leftOption, at: 0.1))
-      XCTAssertTrue(entered.effects.contains(.cursorHalo(isVisible: true)), "schema \(schemaVersion)")
-      XCTAssertTrue(entered.effects.contains(.cursorHaloDiameterChanged(diameter: 28)))
+      XCTAssertTrue(entered.effects.contains(.modeChanged(isEnabled: true)), "schema \(schemaVersion)")
     }
   }
 
-  func testCursorHaloPresentationFailureIsDiagnosticOnly() {
+  func testCursorMarkerPresentationFailureIsDiagnosticOnly() {
     let runtime = KeyveerRuntime(permissions: .allGranted)
     enterFreeMode(runtime)
-    let response = runtime.handle(.cursorHaloPresentationFailed)
+    let response = runtime.handle(.cursorMarkerPresentationFailed)
     XCTAssertEqual(response.disposition, .passThrough)
-    XCTAssertEqual(response.effects, [.diagnostic(.cursorHaloUnavailable)])
+    XCTAssertEqual(response.effects, [.diagnostic(.cursorMarkerUnavailable)])
     var counters = DiagnosticCounters()
     counters.record(response.effects)
-    XCTAssertEqual(counters.cursorHaloPresentationFailureCount, 1)
+    XCTAssertEqual(counters.cursorMarkerPresentationFailureCount, 1)
   }
 
-  func testActiveReloadDisablesCursorHaloImmediately() throws {
+  func testSchemaV3IgnoresRetiredCursorHaloField() throws {
     let runtime = KeyveerRuntime(permissions: .allGranted)
-    enterFreeMode(runtime)
     var object = try configurationObject()
-    var halo = try XCTUnwrap(object["cursorHalo"] as? [String: Any])
-    halo["enabled"] = false
-    object["cursorHalo"] = halo
+    object["cursorHalo"] = ["enabled": true, "diameter": 28.0]
 
     let response = runtime.handle(
       .configuration(try JSONSerialization.data(withJSONObject: object)))
-    XCTAssertTrue(response.effects.contains(.cursorHalo(isVisible: false)))
-  }
-
-  func testCursorHaloHidesOnEverySafetyExit() {
-    let events: [RuntimeEvent] = [
-      .permissionsChanged(.none),
-      .sessionChanged(.inactive),
-      .sessionChanged(.locked),
-      .sessionChanged(.sleeping),
-      .eventTapDisabled,
-      .eventTapRecoveryFailed,
-      .shutdown,
-    ]
-    for event in events {
-      let runtime = KeyveerRuntime(permissions: .allGranted)
-      enterFreeMode(runtime)
-      XCTAssertTrue(
-        runtime.handle(event).effects.contains(.cursorHalo(isVisible: false)),
-        "missing cursor-halo hide effect for safety event")
-    }
+    XCTAssertTrue(response.effects.contains(.configurationAccepted))
   }
 
   func testBindingReferenceGroupsAndLabelsEveryDefaultBinding() {
@@ -1528,9 +1518,7 @@ final class KeyveerRuntimeTests: XCTestCase {
   func testDefaultConfigurationJSONContainsTheConfirmedDefaultsAndSchemaVersion() throws {
     let object = try XCTUnwrap(
       JSONSerialization.jsonObject(with: RuntimeConfiguration.defaultJSON) as? [String: Any])
-    let halo = try XCTUnwrap(object["cursorHalo"] as? [String: Any])
-    XCTAssertEqual(halo["enabled"] as? Bool, true)
-    XCTAssertEqual(halo["diameter"] as? Double, 28)
+    XCTAssertNil(object["cursorHalo"])
 
     let accepted = KeyveerRuntime(permissions: .allGranted).handle(
       .configuration(RuntimeConfiguration.defaultJSON))
@@ -1538,7 +1526,7 @@ final class KeyveerRuntimeTests: XCTestCase {
     XCTAssertTrue(accepted.effects.contains(.configurationAccepted))
   }
 
-  func testValidConfigurationChangesBindingsThresholdScrollAndCursorHalo() throws {
+  func testValidConfigurationChangesBindingsThresholdAndScroll() throws {
     let runtime = KeyveerRuntime(permissions: .allGranted)
     var object = try configurationObject()
     var bindings = try XCTUnwrap(object["bindings"] as? [String: Any])
@@ -1552,10 +1540,6 @@ final class KeyveerRuntimeTests: XCTestCase {
     scrolling["fastMultiplier"] = 2.0
     scrolling["smoothingMilliseconds"] = 1.0
     object["scrolling"] = scrolling
-    var halo = try XCTUnwrap(object["cursorHalo"] as? [String: Any])
-    halo["enabled"] = false
-    object["cursorHalo"] = halo
-
     let accepted = runtime.handle(
       .configuration(try JSONSerialization.data(withJSONObject: object)))
     XCTAssertTrue(accepted.effects.contains(.configurationAccepted))
@@ -1565,7 +1549,7 @@ final class KeyveerRuntimeTests: XCTestCase {
     XCTAssertFalse(timedOut.effects.contains(.modeChanged(isEnabled: true)))
     _ = runtime.handle(.keyDown(.leftOption, at: 1))
     let entered = runtime.handle(.keyUp(.leftOption, at: 1.05))
-    XCTAssertTrue(entered.effects.contains(.cursorHalo(isVisible: false)))
+    XCTAssertTrue(entered.effects.contains(.modeChanged(isEnabled: true)))
 
     _ = runtime.handle(.keyDown(.i, at: 2))
     let right = try XCTUnwrap(pointer(from: runtime.handle(.frame(deltaTime: 1))))
@@ -1580,22 +1564,18 @@ final class KeyveerRuntimeTests: XCTestCase {
     XCTAssertEqual(scroll.y, 100, accuracy: 1)
   }
 
-  func testValidConfigurationChangesRuntimeBehaviorAndCursorHaloDiameter() throws {
+  func testValidConfigurationChangesRuntimeBehavior() throws {
     let runtime = KeyveerRuntime(permissions: .allGranted)
     var object = try configurationObject()
     var movement = try XCTUnwrap(object["movement"] as? [String: Any])
     movement["baseSpeed"] = 600.0
     object["movement"] = movement
-    var halo = try XCTUnwrap(object["cursorHalo"] as? [String: Any])
-    halo["diameter"] = 24.0
-    object["cursorHalo"] = halo
-
     let accepted = runtime.handle(.configuration(try JSONSerialization.data(withJSONObject: object)))
     XCTAssertTrue(accepted.effects.contains(.configurationAccepted))
 
     _ = runtime.handle(.keyDown(.leftOption, at: 0))
     let entered = runtime.handle(.keyUp(.leftOption, at: 0.1))
-    XCTAssertTrue(containsCursorHaloDiameter(24, in: entered))
+    XCTAssertTrue(entered.effects.contains(.modeChanged(isEnabled: true)))
     _ = runtime.handle(.keyDown(.l, at: 1))
     XCTAssertEqual(try XCTUnwrap(pointer(from: runtime.handle(.frame(deltaTime: 1)))).x, 600, accuracy: 0.5)
   }
@@ -1827,12 +1807,4 @@ final class KeyveerRuntimeTests: XCTestCase {
       JSONSerialization.jsonObject(with: RuntimeConfiguration.defaultJSON) as? [String: Any])
   }
 
-  private func containsCursorHaloDiameter(_ diameter: Double, in response: RuntimeResponse) -> Bool {
-    response.effects.contains(where: { effect in
-      if case .cursorHaloDiameterChanged(let actualDiameter) = effect {
-        return actualDiameter == diameter
-      }
-      return false
-    })
-  }
 }
