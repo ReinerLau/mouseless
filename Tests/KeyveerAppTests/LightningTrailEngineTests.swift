@@ -93,17 +93,37 @@ final class LightningTrailEngineTests: XCTestCase {
       engine.move(to: CGPoint(x: 0, y: 0), at: 0)
       engine.move(to: CGPoint(x: 200, y: 0), at: 0.1)
 
-      let interior = try! XCTUnwrap(engine.frame(at: 0.1).bolts.first?.trunk.points)
-        .dropFirst().dropLast().map { abs($0.y) }
-      edgeOffsets.append(contentsOf: [interior.first!, interior.last!])
-      let middle = interior.count / 2
-      middleOffsets.append(contentsOf: [interior[middle - 1], interior[middle]])
+      let points = try! XCTUnwrap(engine.frame(at: 0.1).bolts.first?.trunk.points)
+      let primaryBendOffsets = points.enumerated().compactMap { index, point in
+        index > 0 && index < points.count - 1 && index.isMultiple(of: 2)
+          ? abs(point.y) : nil
+      }
+      edgeOffsets.append(contentsOf: [primaryBendOffsets.first!, primaryBendOffsets.last!])
+      let middle = primaryBendOffsets.count / 2
+      middleOffsets.append(
+        contentsOf: [primaryBendOffsets[middle - 1], primaryBendOffsets[middle]])
     }
 
     let edgeAverage = edgeOffsets.reduce(0, +) / CGFloat(edgeOffsets.count)
     let middleAverage = middleOffsets.reduce(0, +) / CGFloat(middleOffsets.count)
     XCTAssertGreaterThan(edgeAverage / middleAverage, 0.75)
     XCTAssertLessThan(edgeAverage / middleAverage, 1.25)
+  }
+
+  func testEachGapBetweenPrimaryBendsGetsASmallRandomOffset() {
+    var engine = LightningTrailEngine(seed: 42)
+    engine.move(to: CGPoint(x: 0, y: 0), at: 0)
+    engine.move(to: CGPoint(x: 200, y: 0), at: 0.1)
+
+    let points = try! XCTUnwrap(engine.frame(at: 0.1).bolts.first?.trunk.points)
+
+    XCTAssertEqual(points.count, 19)
+    for index in stride(from: 1, to: points.count - 1, by: 2) {
+      let offset = perpendicularDistance(
+        from: points[index], toLineFrom: points[index - 1], to: points[index + 1])
+      XCTAssertGreaterThan(offset, 1)
+      XCTAssertLessThanOrEqual(offset, 5)
+    }
   }
 
   func testCurvedMovementHistoryBendsTheBoltAroundTheTurn() {
@@ -209,5 +229,13 @@ final class LightningTrailEngineTests: XCTestCase {
     }
     let bolts = engine.frame(at: 1).bolts
     return (bolts.count, bolts.last?.id ?? 0)
+  }
+
+  private func perpendicularDistance(
+    from point: CGPoint, toLineFrom start: CGPoint, to end: CGPoint
+  ) -> CGFloat {
+    let delta = CGPoint(x: end.x - start.x, y: end.y - start.y)
+    let fromStart = CGPoint(x: point.x - start.x, y: point.y - start.y)
+    return abs(delta.x * fromStart.y - delta.y * fromStart.x) / hypot(delta.x, delta.y)
   }
 }

@@ -197,7 +197,7 @@ struct LightningTrailEngine {
       segmentWeights.append(random.value(in: 0.55...1.45))
     }
     let totalWeight = segmentWeights.reduce(0, +)
-    var trunkPoints = [anchor]
+    var primaryBendPoints = [anchor]
     var accumulatedWeight: CGFloat = 0
     for index in 1..<segmentCount {
       accumulatedWeight += segmentWeights[index - 1]
@@ -206,15 +206,39 @@ struct LightningTrailEngine {
       let normal = CGPoint(x: -tangent.y, y: tangent.x)
       let direction: CGFloat = random.unit() < 0.5 ? -1 : 1
       let offset = direction * amplitude * random.value(in: 0.25...1)
-      trunkPoints.append(add(center, multiply(normal, offset)))
+      primaryBendPoints.append(add(center, multiply(normal, offset)))
     }
-    trunkPoints.append(head)
+    primaryBendPoints.append(head)
+    let trunkPoints = addInterBendOffsets(
+      to: primaryBendPoints,
+      amplitude: min(5, max(2, amplitude * 0.16)))
     let trunk = LightningStroke(points: trunkPoints)
 
     let speedProgress = min(1, max(0, (speed - 300) / (Self.highSpeed - 300)))
     return LightningBolt(
       id: boltID, trunk: trunk, createdAt: timestamp,
       glowScale: 1 + speedProgress * 0.15)
+  }
+
+  private mutating func addInterBendOffsets(
+    to points: [CGPoint], amplitude: CGFloat
+  ) -> [CGPoint] {
+    guard points.count >= 2 else { return points }
+
+    var detailedPoints = [points[0]]
+    detailedPoints.reserveCapacity(points.count * 2 - 1)
+    for (start, end) in zip(points, points.dropFirst()) {
+      let delta = subtract(end, start)
+      let tangent = normalized(delta)
+      let normal = CGPoint(x: -tangent.y, y: tangent.x)
+      let progress = random.value(in: 0.38...0.62)
+      let direction: CGFloat = random.unit() < 0.5 ? -1 : 1
+      let offset = direction * amplitude * random.value(in: 0.45...1)
+      let center = add(start, multiply(delta, progress))
+      detailedPoints.append(add(center, multiply(normal, offset)))
+      detailedPoints.append(end)
+    }
+    return detailedPoints
   }
 
   private func estimatedSpeed(at timestamp: TimeInterval) -> CGFloat {
