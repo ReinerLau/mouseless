@@ -38,6 +38,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.reinerlau.keyveer
         PRODUCT_NAME: Keyveer
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        PRODUCT_MODULE_NAME: KeyveerApp
         INFOPLIST_KEY_CFBundleIconName: AppIcon
         INFOPLIST_KEY_LSUIElement: NO
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
@@ -56,6 +57,17 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.reinerlau.keyveer.tests
         GENERATE_INFOPLIST_FILE: YES
+  KeyveerAppTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/KeyveerAppTests
+    dependencies:
+      - target: Keyveer
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.reinerlau.keyveer.app-tests
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   Keyveer:
     build:
@@ -67,3 +79,4 @@ schemes:
       config: Debug
       targets:
         - KeyveerRuntimeTests
+        - KeyveerAppTests

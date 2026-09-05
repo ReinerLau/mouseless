@@ -10,7 +10,12 @@ let package = Package(
     ],
     targets: [
         .target(name: "KeyveerRuntime"),
-        .executableTarget(name: "KeyveerApp", dependencies: ["KeyveerRuntime"]),
-        .testTarget(name: "KeyveerRuntimeTests", dependencies: ["KeyveerRuntime"])
+        .executableTarget(
+            name: "KeyveerApp",
+            dependencies: ["KeyveerRuntime"],
+            exclude: ["Assets.xcassets"],
+            swiftSettings: [.unsafeFlags(["-parse-as-library"])]),
+        .testTarget(name: "KeyveerRuntimeTests", dependencies: ["KeyveerRuntime"]),
+        .testTarget(name: "KeyveerAppTests", dependencies: ["KeyveerApp"])
     ]
 )

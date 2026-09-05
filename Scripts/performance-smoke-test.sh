@@ -127,7 +127,7 @@ wait "$driver_pid"
 driver_pid=
 read -r active_cpu active_peak_cpu active_max_rss_kb < <(summarize "$BUILD_DIR/active.samples")
 
-max_rss_kb=$(awk -v idle="$idle_max_rss_kb" -v active="$active_max_rss_kb" 'BEGIN { print idle > active ? idle : active }')
+max_rss_kb=$(awk -v idle="$idle_max_rss_kb" -v active="$active_max_rss_kb" 'BEGIN { print (idle > active ? idle : active) }')
 max_rss_mb=$(awk -v kb="$max_rss_kb" 'BEGIN { printf "%.2f", kb / 1024 }')
 
 printf 'Idle average CPU: %.2f%% (limit %.2f%%)\n' "$idle_cpu" "$IDLE_CPU_LIMIT"

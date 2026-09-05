@@ -316,64 +316,185 @@ private func eventTapCallback(
     type: type, event: event)
 }
 
-private final class CursorMarkerController {
-  private struct TrailPoint {
-    let point: Point
-    let timestamp: TimeInterval
+func configureOverlayPanel(_ panel: NSPanel) {
+  panel.level = .statusBar
+  panel.isOpaque = false
+  panel.backgroundColor = .clear
+  panel.hasShadow = false
+  panel.ignoresMouseEvents = true
+  panel.hidesOnDeactivate = false
+  panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+}
+
+private enum LightningPalette {
+  static let electricBlue = NSColor(
+    srgbRed: 0x24 / 255, green: 0xD2 / 255, blue: 1, alpha: 1)
+  static let glowBlue = NSColor(
+    srgbRed: 0, green: 0x8F / 255, blue: 0xEF / 255, alpha: 1)
+  static let whiteCoreAlpha: CGFloat = 0.98
+  static let innerGlowAlpha: CGFloat = 0.58
+  static let outerGlowAlpha: CGFloat = 0.30
+  static let edgeGlowAlpha: CGFloat = 0.10
+}
+
+final class GlowingMarkerView: NSView {
+  override func draw(_ dirtyRect: NSRect) {
+    drawGlow()
+
+    NSColor.white.withAlphaComponent(LightningPalette.whiteCoreAlpha).setFill()
+    NSBezierPath(ovalIn: centeredSquare(side: 7)).fill()
   }
 
-  private struct TrailSegment {
-    let start: CGPoint
-    let control1: CGPoint
-    let control2: CGPoint
-    let end: CGPoint
-    let alpha: CGFloat
+  private func drawGlow() {
+    guard
+      let context = NSGraphicsContext.current?.cgContext,
+      let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+      let gradient = CGGradient(
+        colorsSpace: colorSpace,
+        colors: [
+          LightningPalette.electricBlue.withAlphaComponent(0.68).cgColor,
+          LightningPalette.electricBlue.withAlphaComponent(LightningPalette.innerGlowAlpha)
+            .cgColor,
+          LightningPalette.glowBlue.withAlphaComponent(LightningPalette.outerGlowAlpha).cgColor,
+          LightningPalette.glowBlue.withAlphaComponent(LightningPalette.edgeGlowAlpha).cgColor,
+          LightningPalette.glowBlue.withAlphaComponent(0).cgColor,
+        ] as CFArray,
+        locations: [0, 0.35, 0.65, 0.86, 1])
+    else { return }
+
+    let center = CGPoint(x: bounds.midX, y: bounds.midY)
+    context.drawRadialGradient(
+      gradient,
+      startCenter: center,
+      startRadius: 0,
+      endCenter: center,
+      endRadius: 9,
+      options: [])
   }
 
-  private final class MarkerView: NSView {
-    override func draw(_ dirtyRect: NSRect) {
-      NSColor.black.withAlphaComponent(0.45).setFill()
-      NSBezierPath(ovalIn: bounds).fill()
-      NSColor.systemBlue.setFill()
-      NSBezierPath(ovalIn: bounds.insetBy(dx: 1, dy: 1)).fill()
+  private func centeredSquare(side: CGFloat) -> NSRect {
+    NSRect(
+      x: bounds.midX - side / 2,
+      y: bounds.midY - side / 2,
+      width: side,
+      height: side)
+  }
+}
+
+final class LightningTrailView: NSView {
+    private struct CachedTrunkSegment {
+      let path: NSBezierPath
+      let widthScale: CGFloat
     }
-  }
 
-  private final class TrailView: NSView {
-    var segments: [TrailSegment] = [] {
-      didSet { needsDisplay = true }
+    private struct CachedBoltPaths {
+      let trunk: [CachedTrunkSegment]
     }
 
+    struct DrawingState {
+      let frame: LightningTrailFrame
+      let canvasOrigin: CGPoint
+    }
+
+    var drawingState = DrawingState(frame: .empty, canvasOrigin: .zero) {
+      didSet {
+        updatePathCache()
+        needsDisplay = true
+      }
+    }
+    private var pathCache: [UInt64: CachedBoltPaths] = [:]
+
     override func draw(_ dirtyRect: NSRect) {
-      guard !segments.isEmpty else { return }
+      guard !drawingState.frame.isEmpty else { return }
 
       NSGraphicsContext.saveGraphicsState()
       defer { NSGraphicsContext.restoreGraphicsState() }
+      NSGraphicsContext.current?.cgContext.translateBy(
+        x: -drawingState.canvasOrigin.x, y: -drawingState.canvasOrigin.y)
 
-      for segment in segments {
-        let path = NSBezierPath()
-        path.move(to: segment.start)
-        path.curve(
-          to: segment.end, controlPoint1: segment.control1, controlPoint2: segment.control2)
-        path.lineWidth = 10
-        path.lineCapStyle = .round
-        path.lineJoinStyle = .round
-        NSColor.systemBlue.withAlphaComponent(segment.alpha).setStroke()
-        path.stroke()
+      for bolt in drawingState.frame.bolts {
+        guard let paths = pathCache[bolt.id] else { continue }
+        draw(paths.trunk, alpha: bolt.alpha, glowScale: bolt.glowScale)
       }
     }
-  }
 
+    private func draw(
+      _ segments: [CachedTrunkSegment], alpha: CGFloat, glowScale: CGFloat
+    ) {
+      guard alpha > 0, !segments.isEmpty else { return }
+      strokeWithBlurredGlow(
+        segments,
+        baseWidth: 6.5,
+        color: LightningPalette.glowBlue.withAlphaComponent(
+          alpha * LightningPalette.edgeGlowAlpha * glowScale),
+        glowColor: LightningPalette.glowBlue.withAlphaComponent(
+          min(1, alpha * glowScale)),
+        blurRadius: 16)
+      stroke(
+        segments, baseWidth: 5,
+        color: LightningPalette.electricBlue.withAlphaComponent(
+          alpha * LightningPalette.innerGlowAlpha * glowScale))
+      stroke(
+        segments, baseWidth: 3.5,
+        color: NSColor.white.withAlphaComponent(
+          min(1, alpha * LightningPalette.whiteCoreAlpha)))
+    }
+
+    private func strokeWithBlurredGlow(
+      _ segments: [CachedTrunkSegment],
+      baseWidth: CGFloat,
+      color: NSColor,
+      glowColor: NSColor,
+      blurRadius: CGFloat
+    ) {
+      guard let context = NSGraphicsContext.current?.cgContext else { return }
+      context.saveGState()
+      defer { context.restoreGState() }
+      context.setShadow(offset: .zero, blur: blurRadius, color: glowColor.cgColor)
+      stroke(segments, baseWidth: baseWidth, color: color)
+    }
+
+    private func stroke(
+      _ segments: [CachedTrunkSegment], baseWidth: CGFloat, color: NSColor
+    ) {
+      color.setStroke()
+      for segment in segments {
+        segment.path.lineWidth = baseWidth * segment.widthScale
+        segment.path.stroke()
+      }
+    }
+
+    private func updatePathCache() {
+      let activeIDs = Set(drawingState.frame.bolts.map(\.id))
+      pathCache = pathCache.filter { activeIDs.contains($0.key) }
+      for bolt in drawingState.frame.bolts where pathCache[bolt.id] == nil {
+        let segments = bolt.trunk.taperedSegments(
+          maximumLength: 4, tailWidthScale: 0.18, headWidthScale: 1.6)
+        pathCache[bolt.id] = CachedBoltPaths(
+          trunk: segments.map { segment in
+            let path = NSBezierPath()
+            path.move(to: segment.start)
+            path.line(to: segment.end)
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            return CachedTrunkSegment(path: path, widthScale: segment.widthScale)
+          })
+      }
+    }
+}
+
+private final class CursorMarkerController {
   private let panelFactory: (NSRect) -> NSPanel?
   private var window: NSPanel?
   private var trailWindow: NSPanel?
-  private var trail: [TrailPoint] = []
-  private let diameter: CGFloat = 10
+  private var lightning = LightningTrailEngine()
+  private var accessibilityObserver: NSObjectProtocol?
+  private let markerDiameter: CGFloat = 10
+  private let markerCanvasSize: CGFloat = 28
   private let offset: CGFloat = 12
-  private let trailDuration: TimeInterval = 0.45
-  private let maximumTrailPoints = 20
   private var lastPoint: Point?
   private var isShown = false
+  private var loggedTrailPanelFailure = false
 
   init(
     panelFactory: @escaping (NSRect) -> NSPanel? = { frame in
@@ -383,6 +504,19 @@ private final class CursorMarkerController {
     }
   ) {
     self.panelFactory = panelFactory
+    accessibilityObserver = NSWorkspace.shared.notificationCenter.addObserver(
+      forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      self?.accessibilityDisplayOptionsChanged()
+    }
+  }
+
+  deinit {
+    if let accessibilityObserver {
+      NSWorkspace.shared.notificationCenter.removeObserver(accessibilityObserver)
+    }
   }
 
   @discardableResult
@@ -400,6 +534,8 @@ private final class CursorMarkerController {
       window?.orderOut(nil)
       return false
     }
+    lightning.clear()
+    lightning.setReduceMotion(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
     isShown = true
     if let lastPoint { move(to: lastPoint) }
     return true
@@ -409,16 +545,16 @@ private final class CursorMarkerController {
     isShown = false
     window?.orderOut(nil)
     trailWindow?.orderOut(nil)
-    (trailWindow?.contentView as? TrailView)?.segments = []
-    trail.removeAll()
+    if let trailView = trailWindow?.contentView as? LightningTrailView {
+      trailView.drawingState = .init(frame: .empty, canvasOrigin: trailWindow?.frame.origin ?? .zero)
+    }
+    lightning.clear()
   }
 
   func move(to point: Point) {
     let now = CACurrentMediaTime()
-    if let lastPoint, lastPoint != point {
-      trail.append(TrailPoint(point: lastPoint, timestamp: now))
-    }
     lastPoint = point
+    if isShown { lightning.move(to: markerCenter(for: point), at: now) }
     render(at: now)
   }
 
@@ -426,55 +562,63 @@ private final class CursorMarkerController {
     render(at: CACurrentMediaTime())
   }
 
+  func screenConfigurationChanged() {
+    guard let trailWindow else { return }
+    let updatedFrame = screenUnionFrame()
+    guard !updatedFrame.isNull, !updatedFrame.isEmpty, trailWindow.frame != updatedFrame else {
+      return
+    }
+    trailWindow.setFrame(updatedFrame, display: false)
+    render(at: CACurrentMediaTime())
+  }
+
   private func makePanel() -> NSPanel? {
-    guard let panel = panelFactory(NSRect(x: 0, y: 0, width: diameter, height: diameter)) else {
+    guard
+      let panel = panelFactory(
+        NSRect(x: 0, y: 0, width: markerCanvasSize, height: markerCanvasSize))
+    else {
       return nil
     }
     configure(panel)
-    panel.contentView = MarkerView(frame: panel.contentRect(forFrameRect: panel.frame))
+    panel.contentView = GlowingMarkerView(frame: panel.contentRect(forFrameRect: panel.frame))
     return panel
   }
 
   private func makeTrailPanel() -> NSPanel? {
-    let frame = NSScreen.screens.map(\.frame).reduce(CGRect.null) { $0.union($1) }
+    let frame = screenUnionFrame()
     guard !frame.isNull, !frame.isEmpty, let panel = panelFactory(frame) else {
       return nil
     }
     configure(panel)
-    panel.contentView = TrailView(frame: panel.contentRect(forFrameRect: panel.frame))
+    panel.contentView = LightningTrailView(frame: panel.contentRect(forFrameRect: panel.frame))
     return panel
   }
 
   private func configure(_ panel: NSPanel) {
-    panel.level = .statusBar
-    panel.isOpaque = false
-    panel.backgroundColor = .clear
-    panel.ignoresMouseEvents = true
-    panel.hidesOnDeactivate = false
-    panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+    configureOverlayPanel(panel)
   }
 
   private func render(at timestamp: TimeInterval) {
     guard isShown, let window else { return }
-    trail.removeAll { timestamp - $0.timestamp >= trailDuration }
-    if trail.count > maximumTrailPoints {
-      trail.removeFirst(trail.count - maximumTrailPoints)
-    }
-
-    if trail.isEmpty {
+    let frame = lightning.frame(at: timestamp)
+    if frame.isEmpty {
       trailWindow?.orderOut(nil)
-      (trailWindow?.contentView as? TrailView)?.segments = []
+      if let trailView = trailWindow?.contentView as? LightningTrailView {
+        trailView.drawingState = .init(
+          frame: .empty, canvasOrigin: trailWindow?.frame.origin ?? .zero)
+      }
     } else {
       if trailWindow == nil {
-        guard let panel = makeTrailPanel() else {
+        if let panel = makeTrailPanel() {
+          trailWindow = panel
+          loggedTrailPanelFailure = false
+        } else if !loggedTrailPanelFailure {
           logger.error("Could not create cursor trail window")
-          trailWindow = nil
-          return
+          loggedTrailPanelFailure = true
         }
-        trailWindow = panel
       }
-      if let trailWindow, let trailView = trailWindow.contentView as? TrailView {
-        trailView.segments = makeTrailSegments(at: timestamp, origin: trailWindow.frame.origin)
+      if let trailWindow, let trailView = trailWindow.contentView as? LightningTrailView {
+        trailView.drawingState = .init(frame: frame, canvasOrigin: trailWindow.frame.origin)
         trailWindow.orderFrontRegardless()
       }
     }
@@ -486,47 +630,29 @@ private final class CursorMarkerController {
     window.orderFrontRegardless()
   }
 
-  private func makeTrailSegments(at timestamp: TimeInterval, origin: NSPoint) -> [TrailSegment] {
-    guard let lastPoint else { return [] }
-
-    let points = trail.map { trailPoint in
-      let age = max(0, timestamp - trailPoint.timestamp)
-      let alpha = CGFloat(max(0, 1 - age / trailDuration) * 0.65)
-      return (point: markerCenter(for: trailPoint.point), alpha: alpha)
-    } + [(point: markerCenter(for: lastPoint), alpha: CGFloat(0.65))]
-
-    guard points.count >= 2 else { return [] }
-
-    return (0..<(points.count - 1)).map { index in
-      let previous = points[max(index - 1, 0)].point
-      let start = points[index].point
-      let end = points[index + 1].point
-      let next = points[min(index + 2, points.count - 1)].point
-      let control1 = CGPoint(
-        x: start.x + (end.x - previous.x) / 6,
-        y: start.y + (end.y - previous.y) / 6)
-      let control2 = CGPoint(
-        x: end.x - (next.x - start.x) / 6,
-        y: end.y - (next.y - start.y) / 6)
-      return TrailSegment(
-        start: CGPoint(x: start.x - origin.x, y: start.y - origin.y),
-        control1: CGPoint(x: control1.x - origin.x, y: control1.y - origin.y),
-        control2: CGPoint(x: control2.x - origin.x, y: control2.y - origin.y),
-        end: CGPoint(x: end.x - origin.x, y: end.y - origin.y),
-        alpha: min(points[index].alpha, points[index + 1].alpha))
+  private func accessibilityDisplayOptionsChanged() {
+    lightning.setReduceMotion(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+    if isShown, let lastPoint {
+      lightning.move(to: markerCenter(for: lastPoint), at: CACurrentMediaTime())
     }
+    render(at: CACurrentMediaTime())
+  }
+
+  private func screenUnionFrame() -> CGRect {
+    NSScreen.screens.map(\.frame).reduce(CGRect.null) { $0.union($1) }
   }
 
   private func markerCenter(for point: Point) -> CGPoint {
     let cocoa = cocoaPoint(fromQuartz: CGPoint(x: point.x, y: point.y))
     return CGPoint(
-      x: cocoa.x + offset + diameter / 2,
-      y: cocoa.y - offset - diameter / 2)
+      x: cocoa.x + offset + markerDiameter / 2,
+      y: cocoa.y - offset - markerDiameter / 2)
   }
 
   private func move(_ window: NSPanel, to point: Point) {
-    let cocoa = cocoaPoint(fromQuartz: CGPoint(x: point.x, y: point.y))
-    window.setFrameOrigin(NSPoint(x: cocoa.x + offset, y: cocoa.y - diameter - offset))
+    let center = markerCenter(for: point)
+    window.setFrameOrigin(
+      NSPoint(x: center.x - markerCanvasSize / 2, y: center.y - markerCanvasSize / 2))
   }
 }
 
@@ -875,6 +1001,7 @@ private final class KeyveerApplicationController: NSObject {
         forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
       ) { [weak self] _ in
         guard let self else { return }
+        self.cursorMarker.screenConfigurationChanged()
         self.apply(self.runtimeResponse(for: .topologyChanged(self.currentTopology())))
       })
     let distributedCenter = DistributedNotificationCenter.default()
